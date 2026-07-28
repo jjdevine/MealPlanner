@@ -33,6 +33,8 @@
   let currentUser = null;
   let authMode = "signin";
   let editingMealId = null;
+  let seasoningTags = [];
+  let selectedSeasoningTags = [];
   let meals = [];
   let plans = [];
   let selectedPlanId = null;
@@ -160,6 +162,133 @@
     $("#ingredient-rows").appendChild(ingredientRowTemplate(values));
   }
 
+  function normalizeTagName(input) {
+    return String(input || "").trim().replace(/\s+/g, " ");
+  }
+
+  function tagKey(name) {
+    return normalizeTagName(name).toLowerCase();
+  }
+
+  function updateSeasoningTagSuggestions() {
+    const list = $("#seasoning-tag-suggestions");
+    list.innerHTML = "";
+    seasoningTags.forEach((tag) => {
+      const option = document.createElement("option");
+      option.value = tag.name;
+      list.appendChild(option);
+    });
+  }
+
+  function renderSelectedSeasoningTags() {
+    const container = $("#selected-seasoning-tags");
+    container.innerHTML = "";
+
+    if (!selectedSeasoningTags.length) {
+      const empty = document.createElement("p");
+      empty.className = "message info";
+      empty.textContent = "No seasoning or garnish tags selected.";
+      container.appendChild(empty);
+      return;
+    }
+
+    selectedSeasoningTags.forEach((tag) => {
+      const chip = document.createElement("span");
+      chip.className = "tag-chip";
+      chip.appendChild(document.createTextNode(tag.name));
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.setAttribute("aria-label", "Remove tag " + tag.name);
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        selectedSeasoningTags = selectedSeasoningTags.filter((item) => tagKey(item.name) !== tagKey(tag.name));
+        renderSelectedSeasoningTags();
+      });
+
+      chip.appendChild(remove);
+      container.appendChild(chip);
+    });
+  }
+
+  function addSelectedSeasoningTag(name) {
+    const normalized = normalizeTagName(name);
+    if (!normalized) return;
+    const normalizedKey = tagKey(normalized);
+    if (selectedSeasoningTags.some((item) => tagKey(item.name) === normalizedKey)) return;
+    selectedSeasoningTags.push({ name: normalized });
+    renderSelectedSeasoningTags();
+  }
+
+  function handleAddSeasoningTag() {
+    const input = $("#seasoning-tag-input");
+    addSelectedSeasoningTag(input.value);
+    input.value = "";
+    input.focus();
+  }
+
+  async function loadSeasoningTags() {
+    const { data, error } = await supabase
+      .schema(APP_SCHEMA)
+      .from("seasoning_tags")
+      .select("id, name")
+      .order("name", { ascending: true });
+
+    if (error) throw error;
+    seasoningTags = data || [];
+    updateSeasoningTagSuggestions();
+  }
+
+  async function ensureSeasoningTagRecords(tagNames) {
+    const uniqueNames = Array.from(new Set((tagNames || []).map(normalizeTagName).filter(Boolean)));
+    const existingByKey = new Map(seasoningTags.map((tag) => [tagKey(tag.name), tag]));
+    const resolved = [];
+
+    for (const name of uniqueNames) {
+      const key = tagKey(name);
+      let tag = existingByKey.get(key);
+
+      if (!tag) {
+        const insertResult = await supabase
+          .schema(APP_SCHEMA)
+          .from("seasoning_tags")
+          .insert({
+            id: uuid(),
+            created_by_user_id: currentUser.id,
+            name,
+          })
+          .select("id, name")
+          .single();
+
+        if (insertResult.error) {
+          if (insertResult.error.code !== "23505") throw insertResult.error;
+
+          const existingResult = await supabase
+            .schema(APP_SCHEMA)
+            .from("seasoning_tags")
+            .select("id, name")
+            .ilike("name", name)
+            .limit(1)
+            .maybeSingle();
+
+          if (existingResult.error) throw existingResult.error;
+          tag = existingResult.data;
+        } else {
+          tag = insertResult.data;
+        }
+
+        if (!tag) throw new Error("Failed to resolve seasoning tag.");
+        existingByKey.set(key, tag);
+      }
+
+      resolved.push(tag);
+    }
+
+    seasoningTags = Array.from(existingByKey.values()).sort((a, b) => a.name.localeCompare(b.name));
+    updateSeasoningTagSuggestions();
+    return resolved;
+  }
+
   function readMealForm() {
     const name = $("#meal-name").value.trim();
     const adjustable = $("#meal-adjustable").checked;
@@ -185,6 +314,7 @@
       allows_portion_adjustment: adjustable,
       fixed_portions: adjustable ? null : fixedPortions,
       ingredients,
+      seasoning_tag_names: selectedSeasoningTags.map((tag) => normalizeTagName(tag.name)).filter(Boolean),
     };
   }
 
@@ -199,10 +329,12 @@
 
   function resetMealForm() {
     editingMealId = null;
+    selectedSeasoningTags = [];
     $("#meal-form").reset();
     $("#save-meal-btn").textContent = "Save Meal";
     $("#ingredient-rows").innerHTML = "";
     addIngredientRow();
+    renderSelectedSeasoningTags();
     clearFormMessage("#meal-form-message");
   }
 
@@ -214,7 +346,7 @@
     const { data, error } = await supabase
       .schema(APP_SCHEMA)
       .from("meals")
-      .select("id, owner_user_id, name, allows_portion_adjustment, fixed_portions, created_at, updated_at, meal_ingredients(id, ingredient_name, quantity, unit, sort_order)")
+      .select("id, owner_user_id, name, allows_portion_adjustment, fixed_portions, created_at, updated_at, meal_ingredients(id, ingredient_name, quantity, unit, sort_order), meal_seasoning_tags(sort_order, seasoning_tags(id, name))")
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -222,9 +354,22 @@
     meals = (data || []).map((meal) => {
       const ingredients = Array.isArray(meal.meal_ingredients) ? meal.meal_ingredients.slice() : [];
       ingredients.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      const seasoningTagRows = Array.isArray(meal.meal_seasoning_tags) ? meal.meal_seasoning_tags.slice() : [];
+      seasoningTagRows.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      const mealSeasoningTags = seasoningTagRows
+        .map((row) => {
+          const seasoningTag = Array.isArray(row.seasoning_tags) ? row.seasoning_tags[0] : row.seasoning_tags;
+          if (!seasoningTag || !seasoningTag.name) return null;
+          return {
+            id: seasoningTag.id,
+            name: seasoningTag.name,
+          };
+        })
+        .filter(Boolean);
       return {
         ...meal,
         meal_ingredients: ingredients,
+        seasoning_tags: mealSeasoningTags,
       };
     });
 
@@ -249,6 +394,9 @@
         escapeHtml(ing.unit) +
       "</span>")
       .join("");
+    const seasoningsHtml = (meal.seasoning_tags || [])
+      .map((tag) => '<span class="seasoning-chip">' + escapeHtml(tag.name) + "</span>")
+      .join("");
 
     card.innerHTML = [
       '<div class="meal-card-top">',
@@ -258,6 +406,7 @@
       "</div>",
       "</div>",
       '<div class="ingredient-list">' + ingredientsHtml + "</div>",
+      seasoningsHtml ? '<div class="ingredient-list"><strong>Seasonings + Garnishes:</strong><div>' + seasoningsHtml + "</div></div>" : "",
       '<div class="card-actions"></div>',
     ].join("");
 
@@ -315,6 +464,7 @@
     }
 
     try {
+      const seasoningTagRecords = await ensureSeasoningTagRecords(payload.seasoning_tag_names);
       if (!editingMealId) {
         const mealInsert = {
           id: uuid(),
@@ -340,6 +490,16 @@
         const ingredientResult = await supabase.schema(APP_SCHEMA).from("meal_ingredients").insert(ingredients);
         if (ingredientResult.error) throw ingredientResult.error;
 
+        if (seasoningTagRecords.length) {
+          const seasoningRows = seasoningTagRecords.map((tag, idx) => ({
+            meal_id: mealId,
+            tag_id: tag.id,
+            sort_order: idx,
+          }));
+          const seasoningResult = await supabase.schema(APP_SCHEMA).from("meal_seasoning_tags").insert(seasoningRows);
+          if (seasoningResult.error) throw seasoningResult.error;
+        }
+
         showMealFormMessage("Meal created.", "success");
       } else {
         const existing = meals.find((meal) => meal.id === editingMealId);
@@ -361,6 +521,8 @@
 
         const deleteIngResult = await supabase.schema(APP_SCHEMA).from("meal_ingredients").delete().eq("meal_id", editingMealId);
         if (deleteIngResult.error) throw deleteIngResult.error;
+        const deleteSeasoningResult = await supabase.schema(APP_SCHEMA).from("meal_seasoning_tags").delete().eq("meal_id", editingMealId);
+        if (deleteSeasoningResult.error) throw deleteSeasoningResult.error;
 
         const ingredients = payload.ingredients.map((ing) => ({
           id: uuid(),
@@ -373,6 +535,16 @@
 
         const ingredientInsert = await supabase.schema(APP_SCHEMA).from("meal_ingredients").insert(ingredients);
         if (ingredientInsert.error) throw ingredientInsert.error;
+
+        if (seasoningTagRecords.length) {
+          const seasoningRows = seasoningTagRecords.map((tag, idx) => ({
+            meal_id: editingMealId,
+            tag_id: tag.id,
+            sort_order: idx,
+          }));
+          const seasoningInsert = await supabase.schema(APP_SCHEMA).from("meal_seasoning_tags").insert(seasoningRows);
+          if (seasoningInsert.error) throw seasoningInsert.error;
+        }
 
         showMealFormMessage("Meal updated.", "success");
       }
@@ -400,6 +572,8 @@
     if (!meal.meal_ingredients || !meal.meal_ingredients.length) {
       addIngredientRow();
     }
+    selectedSeasoningTags = (meal.seasoning_tags || []).map((tag) => ({ name: tag.name }));
+    renderSelectedSeasoningTags();
 
     setMainTab("meals");
     showMealFormMessage("Editing your meal.", "info");
@@ -833,6 +1007,7 @@
     setStatus("Loading your data...", "info");
 
     try {
+      await loadSeasoningTags();
       await loadMeals();
       await loadPlans();
       setStatus("Ready.", "success");
@@ -859,9 +1034,13 @@
     $("#logout-btn").addEventListener("click", async () => {
       await signOut();
       meals = [];
+      seasoningTags = [];
+      selectedSeasoningTags = [];
       plans = [];
       selectedPlanId = null;
       dayDrafts = {};
+      updateSeasoningTagSuggestions();
+      renderSelectedSeasoningTags();
       setScreen("auth");
       setStatus("", "info");
     });
@@ -870,6 +1049,13 @@
     $("#open-plans-tab").addEventListener("click", () => setMainTab("plans"));
 
     $("#add-ingredient-row").addEventListener("click", () => addIngredientRow());
+    $("#add-seasoning-tag").addEventListener("click", handleAddSeasoningTag);
+    $("#seasoning-tag-input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handleAddSeasoningTag();
+      }
+    });
     $("#clear-meal-form").addEventListener("click", resetMealForm);
     $("#meal-form").addEventListener("submit", saveMeal);
 
@@ -894,6 +1080,7 @@
     bindEvents();
     $("#plan-start").value = nowDateIso();
     addIngredientRow();
+    renderSelectedSeasoningTags();
     setMainTab("meals");
 
     if (!supabaseConfigured || !supabase) {
