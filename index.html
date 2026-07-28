@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MealPlanner</title>
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <div id="splash-screen" class="splash-screen active">
+      <div class="splash-content">
+        <div class="splash-icon">MP</div>
+        <h1 class="splash-title">MealPlanner</h1>
+        <p class="splash-subtitle">Plan meals, track ingredients, and generate your week.</p>
+        <div class="splash-dots"><span></span><span></span><span></span></div>
+      </div>
+    </div>
+
+    <section id="auth-screen" class="screen">
+      <header class="app-header">
+        <h1>MealPlanner</h1>
+        <p class="subtitle">Shared meal pool with user-owned editing</p>
+      </header>
+
+      <div class="panel auth-panel">
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" data-mode="signin">Sign In</button>
+          <button type="button" class="auth-tab" data-mode="signup">Sign Up</button>
+        </div>
+        <form id="auth-form" class="stack-form">
+          <input id="auth-email" type="email" placeholder="Email" required autocomplete="email">
+          <input id="auth-password" type="password" placeholder="Password" required minlength="6" autocomplete="current-password">
+          <button id="auth-submit" type="submit" class="btn-primary">Sign In</button>
+          <p id="auth-error" class="message error hidden"></p>
+        </form>
+      </div>
+    </section>
+
+    <section id="main-screen" class="screen">
+      <header class="app-header">
+        <h1>MealPlanner</h1>
+        <p class="subtitle">Meals and plans for upcoming days</p>
+        <div class="user-row">
+          <span id="user-email" class="user-email"></span>
+          <button id="logout-btn" type="button" class="btn-secondary">Sign out</button>
+        </div>
+        <p id="status" class="message info"></p>
+      </header>
+
+      <div class="tab-row">
+        <button id="open-meals-tab" type="button" class="tab-btn active">Meals</button>
+        <button id="open-plans-tab" type="button" class="tab-btn">Meal Plans</button>
+      </div>
+
+      <section id="meals-panel" class="panel view-panel active">
+        <div class="panel-heading">
+          <h2>Meal Library</h2>
+          <p class="subtitle">Create meals with ingredient weights and portion rules.</p>
+        </div>
+
+        <form id="meal-form" class="stack-form">
+          <input id="meal-name" type="text" placeholder="Meal name" required maxlength="120">
+          <div class="inline-field">
+            <label class="checkbox-row">
+              <input id="meal-adjustable" type="checkbox" checked>
+              <span>Portions can be adjusted</span>
+            </label>
+            <input id="meal-fixed-portions" type="number" min="1" step="1" placeholder="Fixed portions (required when non-adjustable)">
+          </div>
+
+          <div class="ingredients-block">
+            <div class="ingredients-header">
+              <h3>Ingredients</h3>
+              <button id="add-ingredient-row" type="button" class="btn-secondary">Add ingredient</button>
+            </div>
+            <div id="ingredient-rows" class="ingredient-rows"></div>
+          </div>
+
+          <div class="form-actions">
+            <button id="clear-meal-form" type="button" class="btn-secondary">Clear</button>
+            <button id="save-meal-btn" type="submit" class="btn-primary">Save Meal</button>
+          </div>
+          <p id="meal-form-message" class="message hidden"></p>
+        </form>
+
+        <div class="panel-heading tight">
+          <h3>All Meals (pooled)</h3>
+          <p class="subtitle">You can edit or delete only meals you created.</p>
+        </div>
+        <div id="meal-list" class="card-grid"></div>
+      </section>
+
+      <section id="plans-panel" class="panel view-panel hidden">
+        <div class="panel-heading">
+          <h2>Meal Plans</h2>
+          <p class="subtitle">Create an upcoming meal period and fill days manually or automatically.</p>
+        </div>
+
+        <form id="plan-form" class="stack-form">
+          <input id="plan-title" type="text" placeholder="Plan title (example: Next Week)" required maxlength="120">
+          <div class="inline-field">
+            <label for="plan-start">Start date</label>
+            <input id="plan-start" type="date" required>
+          </div>
+          <div class="inline-field">
+            <label for="plan-days">Days in plan</label>
+            <input id="plan-days" type="number" min="1" max="60" value="7" required>
+          </div>
+          <div class="form-actions">
+            <button id="create-plan-btn" type="submit" class="btn-primary">Create Plan</button>
+          </div>
+          <p id="plan-form-message" class="message hidden"></p>
+        </form>
+
+        <div class="plan-picker">
+          <label for="plan-select">Select plan</label>
+          <select id="plan-select"></select>
+        </div>
+
+        <div class="plan-actions">
+          <button id="auto-suggest-btn" type="button" class="btn-secondary">Auto Suggest Meals</button>
+          <button id="clear-plan-btn" type="button" class="btn-secondary">Clear Plan Days</button>
+        </div>
+
+        <div id="plan-days-grid" class="plan-days-grid"></div>
+      </section>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="supabase-config.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" })
+          .then((registration) => registration.update())
+          .catch((err) => {
+            console.warn("Service worker registration failed:", err);
+          });
+      });
+
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (hadController) {
+          window.location.reload();
+        }
+      });
+    }
+  </script>
+</body>
+</html>
