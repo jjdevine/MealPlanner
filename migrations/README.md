@@ -4,6 +4,7 @@ Run these scripts in order using the Supabase SQL editor:
 
 1. 0001_create_mealplanner_schema.sql
 2. 0002_enable_rls_and_policies.sql
+3. 0003_add_seasoning_tags.sql
 
 Notes:
 - The app uses a dedicated schema named mealplanner (not public).

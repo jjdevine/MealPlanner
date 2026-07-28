@@ -4,7 +4,7 @@ MealPlanner is a single-page web app modeled after the ToDoMobile architecture.
 
 ## Features
 
-- Meals with name, ingredient list, quantities, and units
+- Meals with name, ingredient list, quantities, units, and reusable seasoning/garnish tags
 - Portion rules per meal:
   - Adjustable portions
   - Fixed portion recipes
