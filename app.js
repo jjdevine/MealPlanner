@@ -845,10 +845,11 @@
     }
 
     if (planMode === "view") return;
+    const creatingPlan = planMode === "create";
 
     try {
       let planId = selectedPlanId;
-      if (planMode === "create") {
+      if (creatingPlan) {
         const insert = await supabase
           .schema(APP_SCHEMA)
           .from("meal_plan_periods")
@@ -894,8 +895,8 @@
       selectedPlanId = planId;
       await loadPlans();
       await setPlanMode("edit");
-      showPlanFormMessage(planMode === "create" ? "Plan created." : "Plan updated.", "success");
-      setStatus(planMode === "create" ? "Plan saved." : "Plan changes saved.", "success");
+      showPlanFormMessage(creatingPlan ? "Plan created." : "Plan updated.", "success");
+      setStatus(creatingPlan ? "Plan saved." : "Plan changes saved.", "success");
     } catch (error) {
       console.error(error);
       showPlanFormMessage(error.message || "Failed to save plan.", "error");
