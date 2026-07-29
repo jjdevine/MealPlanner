@@ -665,6 +665,7 @@
       if (startCompare !== 0) return startCompare;
       return String(a.title || "").localeCompare(String(b.title || ""));
     });
+
     const select = $("#plan-select");
     select.innerHTML = "";
 
@@ -675,6 +676,10 @@
       option.textContent = "No plans yet";
       select.appendChild(option);
       renderPlanList();
+      if (planMode === "edit") {
+        resetPlanForm();
+        dayDrafts = {};
+      }
       renderPlanDays();
       return;
     }
@@ -690,54 +695,54 @@
       selectedPlanId = plans[0].id;
     }
     select.value = selectedPlanId;
+
+    if (planMode === "edit") {
+      const selected = getSelectedPlan();
+      if (selected) setPlanFormFromPlan(selected);
+    }
+
     renderPlanList();
-    await loadPlanEntries(selectedPlanId);
+    if (planMode === "edit") {
+      await loadPlanEntries(selectedPlanId);
+    } else {
+      renderPlanDays();
+    }
   }
 
-  async function createPlan(event) {
-    event.preventDefault();
-    clearFormMessage("#plan-form-message");
+  function getPlanFormValues() {
+    return {
+      title: $("#plan-title").value.trim(),
+      start_date: $("#plan-start").value,
+      days_count: Number($("#plan-days").value),
+      people_count: Number($("#plan-people-count").value),
+      same_meal_for_all: $("#plan-same-meal-all").checked,
+    };
+  }
 
-    const title = $("#plan-title").value.trim();
-    const startDate = $("#plan-start").value;
-    const daysCount = Number($("#plan-days").value);
-    const peopleCount = Number($("#plan-people-count").value);
-    const sameMealForAll = $("#plan-same-meal-all").checked;
+  function resetPlanForm() {
+    $("#plan-form").reset();
+    $("#plan-title").value = "";
+    $("#plan-start").value = nowDateIso();
+    $("#plan-days").value = "7";
+    $("#plan-people-count").value = "1";
+    $("#plan-same-meal-all").checked = true;
+  }
 
-    if (!title || !startDate || !daysCount || daysCount < 1 || !peopleCount || peopleCount < 1) {
-      showPlanFormMessage("Title, start date, day count, and people count are required.", "error");
-      return;
-    }
+  function setPlanFormFromPlan(plan) {
+    if (!plan) return;
+    $("#plan-title").value = plan.title || "";
+    $("#plan-start").value = plan.start_date || nowDateIso();
+    $("#plan-days").value = String(plan.days_count || 7);
+    $("#plan-people-count").value = String(plan.people_count || 1);
+    $("#plan-same-meal-all").checked = plan.same_meal_for_all !== false;
+  }
 
-    try {
-      const insert = await supabase
-        .schema(APP_SCHEMA)
-        .from("meal_plan_periods")
-        .insert({
-          id: uuid(),
-          owner_user_id: currentUser.id,
-          title,
-          start_date: startDate,
-          days_count: daysCount,
-          people_count: peopleCount,
-          same_meal_for_all: sameMealForAll,
-        })
-        .select("id")
-        .single();
-
-      if (insert.error) throw insert.error;
-
-      $("#plan-form").reset();
-      $("#plan-days").value = "7";
-      $("#plan-people-count").value = "1";
-      $("#plan-same-meal-all").checked = true;
-      showPlanFormMessage("Plan created.", "success");
-      selectedPlanId = insert.data.id;
-      await loadPlans();
-    } catch (error) {
-      console.error(error);
-      showPlanFormMessage(error.message || "Failed to create plan.", "error");
-    }
+  function getPlanPortionContext() {
+    const values = getPlanFormValues();
+    return {
+      people_count: values.people_count,
+      same_meal_for_all: values.same_meal_for_all,
+    };
   }
 
   async function loadPlanEntries(planId) {
@@ -784,12 +789,165 @@
     return "Historic";
   }
 
-  function setPlanMode(mode) {
-    planMode = mode === "edit" ? "edit" : "view";
+  async function setPlanMode(mode) {
+    const normalizedMode = mode === "create" || mode === "edit" ? mode : "view";
+    planMode = normalizedMode;
+
     $("#plan-view-mode-btn").classList.toggle("active", planMode === "view");
+    $("#plan-create-mode-btn").classList.toggle("active", planMode === "create");
     $("#plan-edit-mode-btn").classList.toggle("active", planMode === "edit");
     $("#plan-view-mode-panel").classList.toggle("hidden", planMode !== "view");
-    $("#plan-edit-mode-panel").classList.toggle("hidden", planMode !== "edit");
+    $("#plan-edit-mode-panel").classList.toggle("hidden", planMode === "view");
+    $("#plan-picker-wrap").classList.toggle("hidden", planMode !== "edit");
+    $("#delete-plan-btn").classList.toggle("hidden", planMode !== "edit");
+
+    const editorTitle = $("#plan-editor-title");
+    const saveButton = $("#save-plan-btn");
+    editorTitle.textContent = planMode === "create" ? "Create Plan" : "Edit Plan";
+    saveButton.textContent = planMode === "create" ? "Save Plan" : "Save Changes";
+
+    clearFormMessage("#plan-form-message");
+
+    if (planMode === "create") {
+      resetPlanForm();
+      dayDrafts = {};
+      renderPlanDays();
+      return;
+    }
+
+    if (planMode === "edit") {
+      if (!selectedPlanId && plans.length) {
+        selectedPlanId = plans[0].id;
+      }
+      const plan = getSelectedPlan();
+      if (plan) {
+        $("#plan-select").value = plan.id;
+        setPlanFormFromPlan(plan);
+        await loadPlanEntries(plan.id);
+      } else {
+        resetPlanForm();
+        dayDrafts = {};
+        renderPlanDays();
+      }
+      return;
+    }
+
+    renderPlanDays();
+  }
+
+  async function savePlan() {
+    clearFormMessage("#plan-form-message");
+
+    const values = getPlanFormValues();
+    if (!values.title || !values.start_date || !values.days_count || values.days_count < 1 || !values.people_count || values.people_count < 1) {
+      showPlanFormMessage("Title, start date, day count, and people count are required.", "error");
+      return;
+    }
+
+    if (planMode === "view") return;
+    const creatingPlan = planMode === "create";
+
+    try {
+      let planId = selectedPlanId;
+      if (creatingPlan) {
+        const insert = await supabase
+          .schema(APP_SCHEMA)
+          .from("meal_plan_periods")
+          .insert({
+            id: uuid(),
+            owner_user_id: currentUser.id,
+            title: values.title,
+            start_date: values.start_date,
+            days_count: values.days_count,
+            people_count: values.people_count,
+            same_meal_for_all: values.same_meal_for_all,
+          })
+          .select("id")
+          .single();
+        if (insert.error) throw insert.error;
+        planId = insert.data.id;
+      } else {
+        const plan = getSelectedPlan();
+        if (!plan) {
+          showPlanFormMessage("Select a plan to edit.", "error");
+          return;
+        }
+        if (!canEditPlan(plan)) {
+          showPlanFormMessage("You can only edit plans you created.", "error");
+          return;
+        }
+        const updateResult = await supabase
+          .schema(APP_SCHEMA)
+          .from("meal_plan_periods")
+          .update({
+            title: values.title,
+            start_date: values.start_date,
+            days_count: values.days_count,
+            people_count: values.people_count,
+            same_meal_for_all: values.same_meal_for_all,
+          })
+          .eq("id", plan.id);
+        if (updateResult.error) throw updateResult.error;
+      }
+
+      await persistPlanEntries(planId, values);
+
+      selectedPlanId = planId;
+      await loadPlans();
+      await setPlanMode("edit");
+      showPlanFormMessage(creatingPlan ? "Plan created." : "Plan updated.", "success");
+      setStatus(creatingPlan ? "Plan saved." : "Plan changes saved.", "success");
+    } catch (error) {
+      console.error(error);
+      showPlanFormMessage(error.message || "Failed to save plan.", "error");
+    }
+  }
+
+  async function persistPlanEntries(planId, planValues) {
+    const drafts = dayDrafts;
+    const planContext = {
+      people_count: planValues.people_count,
+      same_meal_for_all: planValues.same_meal_for_all,
+    };
+    const rows = [];
+
+    for (let dayIndex = 0; dayIndex < planValues.days_count; dayIndex += 1) {
+      const key = String(dayIndex);
+      const draft = drafts[key] || {};
+      if (!draft.meal_id) continue;
+
+      const meal = getMealById(draft.meal_id);
+      let portions = draft.portions ? Number(draft.portions) : null;
+      if (!portions || portions <= 0) {
+        throw new Error("Portions must be greater than zero for day " + (dayIndex + 1) + ".");
+      }
+
+      if (meal) {
+        const minimumPortions = getDefaultPlanPortions(meal, planContext);
+        if (portions < minimumPortions) {
+          throw new Error("Portions must be at least " + minimumPortions + " for day " + (dayIndex + 1) + ".");
+        }
+      }
+
+      rows.push({
+        id: draft.id || uuid(),
+        period_id: planId,
+        day_index: dayIndex,
+        scheduled_date: addDays(planValues.start_date, dayIndex),
+        meal_id: draft.meal_id,
+        portions,
+      });
+    }
+
+    const clearResult = await supabase.schema(APP_SCHEMA).from("meal_plan_entries").delete().eq("period_id", planId);
+    if (clearResult.error) throw clearResult.error;
+
+    if (!rows.length) return;
+    const upsertResult = await supabase
+      .schema(APP_SCHEMA)
+      .from("meal_plan_entries")
+      .upsert(rows, { onConflict: "period_id,day_index" });
+    if (upsertResult.error) throw upsertResult.error;
   }
 
   function renderPlanList() {
@@ -839,9 +997,7 @@
       editBtn.textContent = "Edit";
       editBtn.addEventListener("click", async () => {
         selectedPlanId = plan.id;
-        $("#plan-select").value = selectedPlanId;
-        await loadPlanEntries(selectedPlanId);
-        setPlanMode("edit");
+        await setPlanMode("edit");
       });
       actions.appendChild(editBtn);
 
@@ -1059,13 +1215,13 @@
   }
 
   function buildDayRows() {
-    const plan = getSelectedPlan();
-    if (!plan) return [];
+    const values = getPlanFormValues();
+    if (!values.start_date || !values.days_count || values.days_count < 1) return [];
 
     const rows = [];
-    for (let index = 0; index < plan.days_count; index += 1) {
+    for (let index = 0; index < values.days_count; index += 1) {
       const key = String(index);
-      const scheduledDate = addDays(plan.start_date, index);
+      const scheduledDate = addDays(values.start_date, index);
       const draft = dayDrafts[key] || { meal_id: "", portions: "", scheduled_date: scheduledDate };
       rows.push({
         day_index: index,
@@ -1101,13 +1257,13 @@
     const plan = getSelectedPlan();
     const deletePlanBtn = $("#delete-plan-btn");
     if (deletePlanBtn) {
-      deletePlanBtn.disabled = !plan || !canEditPlan(plan);
+      deletePlanBtn.disabled = planMode !== "edit" || !plan || !canEditPlan(plan);
     }
 
-    if (!plan) {
+    if (planMode === "edit" && !plan) {
       const empty = document.createElement("p");
       empty.className = "message info";
-      empty.textContent = "Create a plan to start assigning meals.";
+      empty.textContent = "Select a plan to edit.";
       grid.appendChild(empty);
       renderPlanShoppingSummary();
       return;
@@ -1156,7 +1312,7 @@
       mealSelect.addEventListener("change", () => {
         const selectedMeal = getMealById(mealSelect.value);
         if (selectedMeal) {
-          const defaultPortions = getDefaultPlanPortions(selectedMeal, plan);
+          const defaultPortions = getDefaultPlanPortions(selectedMeal, getPlanPortionContext());
           const currentPortions = portions.value ? Number(portions.value) : null;
           if (!currentPortions || currentPortions < defaultPortions) {
             portions.value = String(defaultPortions);
@@ -1175,7 +1331,7 @@
 
       const selectedMeal = getMealById(row.meal_id);
       if (selectedMeal) {
-        const minimumPortions = getDefaultPlanPortions(selectedMeal, plan);
+        const minimumPortions = getDefaultPlanPortions(selectedMeal, getPlanPortionContext());
         const currentPortions = portions.value ? Number(portions.value) : null;
         if (!currentPortions || currentPortions < minimumPortions) {
           portions.value = String(minimumPortions);
@@ -1192,16 +1348,9 @@
         renderPlanShoppingSummary();
       });
 
-      const saveButton = document.createElement("button");
-      saveButton.type = "button";
-      saveButton.className = "save-day";
-      saveButton.textContent = "Save";
-      saveButton.addEventListener("click", () => saveDay(row.day_index, row.scheduled_date));
-
       wrapper.appendChild(label);
       wrapper.appendChild(mealField);
       wrapper.appendChild(portionsField);
-      wrapper.appendChild(saveButton);
       grid.appendChild(wrapper);
     });
     renderPlanShoppingSummary();
@@ -1212,15 +1361,15 @@
     if (!container) return;
     container.innerHTML = "";
 
-    const plan = getSelectedPlan();
+    const values = getPlanFormValues();
     const heading = document.createElement("h3");
     heading.textContent = "Shopping List";
     container.appendChild(heading);
 
-    if (!plan) {
+    if (!values.start_date || !values.days_count || values.days_count < 1) {
       const empty = document.createElement("p");
       empty.className = "message info";
-      empty.textContent = "Select a plan to view ingredient totals.";
+      empty.textContent = "Set a valid start date and day count to view ingredient totals.";
       container.appendChild(empty);
       return;
     }
@@ -1315,68 +1464,9 @@
     }
   }
 
-  async function saveDay(dayIndex, scheduledDate) {
-    const key = String(dayIndex);
-    const draft = dayDrafts[key] || {};
-    if (!selectedPlanId) return;
-
-    try {
-      if (!draft.meal_id) {
-        const removeResult = await supabase
-          .schema(APP_SCHEMA)
-          .from("meal_plan_entries")
-          .delete()
-          .eq("period_id", selectedPlanId)
-          .eq("day_index", dayIndex);
-        if (removeResult.error) throw removeResult.error;
-        setStatus("Day cleared.", "success");
-        await loadPlanEntries(selectedPlanId);
-        return;
-      }
-
-      const meal = getMealById(draft.meal_id);
-      let portions = draft.portions ? Number(draft.portions) : null;
-      if (!portions || portions <= 0) {
-        setStatus("Portions must be greater than zero.", "error");
-        return;
-      }
-      if (meal) {
-        const minimumPortions = getDefaultPlanPortions(meal, getSelectedPlan());
-        if (portions < minimumPortions) {
-          setStatus("Portions must be at least " + minimumPortions + " for this meal.", "error");
-          return;
-        }
-      }
-
-      const upsertResult = await supabase
-        .schema(APP_SCHEMA)
-        .from("meal_plan_entries")
-        .upsert(
-          {
-            id: draft.id || uuid(),
-            period_id: selectedPlanId,
-            day_index: dayIndex,
-            scheduled_date: scheduledDate,
-            meal_id: draft.meal_id,
-            portions,
-          },
-          { onConflict: "period_id,day_index" }
-        );
-
-      if (upsertResult.error) throw upsertResult.error;
-
-      setStatus("Saved day " + (dayIndex + 1) + ".", "success");
-      await loadPlanEntries(selectedPlanId);
-    } catch (error) {
-      console.error(error);
-      setStatus(error.message || "Failed to save day.", "error");
-    }
-  }
-
   async function autoSuggestMeals() {
-    if (!selectedPlanId) return;
-    const plan = getSelectedPlan();
-    if (!plan || !meals.length) return;
+    const values = getPlanFormValues();
+    if (!values.start_date || !values.days_count || values.days_count < 1 || !meals.length) return;
 
     const rotated = meals.slice();
     for (let i = rotated.length - 1; i > 0; i -= 1) {
@@ -1387,47 +1477,37 @@
     }
 
     const rows = [];
-    for (let day = 0; day < plan.days_count; day += 1) {
+    for (let day = 0; day < values.days_count; day += 1) {
       const meal = rotated[day % rotated.length];
-      const portions = getDefaultPlanPortions(meal, plan);
+      const portions = getDefaultPlanPortions(meal, getPlanPortionContext());
       rows.push({
-        id: uuid(),
-        period_id: selectedPlanId,
         day_index: day,
-        scheduled_date: addDays(plan.start_date, day),
+        scheduled_date: addDays(values.start_date, day),
         meal_id: meal.id,
         portions,
       });
     }
 
-    try {
-      const result = await supabase
-        .schema(APP_SCHEMA)
-        .from("meal_plan_entries")
-        .upsert(rows, { onConflict: "period_id,day_index" });
-      if (result.error) throw result.error;
-      setStatus("Suggested meals generated.", "success");
-      await loadPlanEntries(selectedPlanId);
-    } catch (error) {
-      console.error(error);
-      setStatus(error.message || "Auto-suggest failed.", "error");
-    }
+    rows.forEach((row) => {
+      const key = String(row.day_index);
+      const existing = dayDrafts[key] || {};
+      dayDrafts[key] = {
+        ...existing,
+        meal_id: row.meal_id,
+        portions: String(row.portions),
+        scheduled_date: row.scheduled_date,
+      };
+    });
+    renderPlanDays();
+    setStatus("Suggested meals prepared. Save plan to keep changes.", "success");
   }
 
   async function clearPlanDays() {
-    if (!selectedPlanId) return;
-    const confirmed = window.confirm("Clear all assigned meals from this plan?");
+    const confirmed = window.confirm("Clear all assigned meals from this draft plan?");
     if (!confirmed) return;
-
-    try {
-      const result = await supabase.schema(APP_SCHEMA).from("meal_plan_entries").delete().eq("period_id", selectedPlanId);
-      if (result.error) throw result.error;
-      setStatus("Plan days cleared.", "success");
-      await loadPlanEntries(selectedPlanId);
-    } catch (error) {
-      console.error(error);
-      setStatus(error.message || "Failed to clear plan.", "error");
-    }
+    dayDrafts = {};
+    renderPlanDays();
+    setStatus("Draft plan days cleared. Save plan to keep changes.", "success");
   }
 
   async function deletePlan(planId) {
@@ -1445,7 +1525,7 @@
         dayDrafts = {};
       }
       await loadPlans();
-      setPlanMode("view");
+      await setPlanMode("view");
       setStatus("Plan deleted.", "success");
     } catch (error) {
       console.error(error);
@@ -1551,7 +1631,7 @@
       planMode = "view";
       showHistoricPlans = false;
       $("#show-historic-plans").checked = false;
-      setPlanMode("view");
+      await setPlanMode("view");
       renderPlanList();
       updateSeasoningTagSuggestions();
       renderSelectedSeasoningTags();
@@ -1573,8 +1653,13 @@
     $("#clear-meal-form").addEventListener("click", resetMealForm);
     $("#meal-form").addEventListener("submit", saveMeal);
 
-    $("#plan-form").addEventListener("submit", createPlan);
+    $("#plan-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await savePlan();
+    });
+    $("#save-plan-btn").addEventListener("click", savePlan);
     $("#plan-view-mode-btn").addEventListener("click", () => setPlanMode("view"));
+    $("#plan-create-mode-btn").addEventListener("click", () => setPlanMode("create"));
     $("#plan-edit-mode-btn").addEventListener("click", () => setPlanMode("edit"));
     $("#show-historic-plans").addEventListener("change", (event) => {
       showHistoricPlans = !!event.target.checked;
@@ -1583,7 +1668,15 @@
 
     $("#plan-select").addEventListener("change", async (event) => {
       selectedPlanId = event.target.value || null;
+      const plan = getSelectedPlan();
+      if (plan) setPlanFormFromPlan(plan);
       await loadPlanEntries(selectedPlanId);
+    });
+
+    ["#plan-start", "#plan-days", "#plan-people-count", "#plan-same-meal-all"].forEach((selector) => {
+      $(selector).addEventListener("change", () => {
+        renderPlanDays();
+      });
     });
 
     $("#auto-suggest-btn").addEventListener("click", autoSuggestMeals);
@@ -1596,7 +1689,7 @@
 
   async function start() {
     bindEvents();
-    setPlanMode("view");
+    await setPlanMode("view");
     $("#plan-start").value = nowDateIso();
     addIngredientRow();
     renderSelectedSeasoningTags();
