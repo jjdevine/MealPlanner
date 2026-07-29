@@ -161,9 +161,28 @@ button,input,select,textarea{font:inherit}
 .shopping-section-title{font-weight:700;margin-top:.5rem}
 .shopping-list{margin:.35rem 0 0 1.1rem;display:grid;gap:.2rem}
 
+.plan-view-detail{border-top:1px solid var(--border);margin-top:.65rem;padding-top:.7rem;display:grid;gap:.6rem}
+.plan-view-section-title{font-weight:700;font-size:.9rem;letter-spacing:.01em}
+.plan-view-days-grid{display:grid;gap:.3rem}
+.plan-view-day-row{
+  display:grid;grid-template-columns:1.6fr 2fr auto;gap:.5rem;align-items:center;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:.4rem .65rem;font-size:.87rem;
+}
+.plan-view-day-row.past{opacity:.45}
+.plan-view-day-label{font-weight:600}
+.plan-view-day-meal{color:var(--muted)}
+.plan-view-day-meal.no-meal{font-style:italic}
+.plan-view-day-portions{font-size:.8rem;color:var(--muted);text-align:right}
+.plan-view-shopping-note{
+  font-size:.82rem;color:var(--muted);background:#f0f7f3;
+  border:1px solid #c5decc;border-radius:8px;padding:.35rem .6rem;
+}
+.plan-list-actions .toggle-detail{background:#f4efe3;color:var(--text)}
+
 @media (max-width: 760px){
   .ingredient-row{grid-template-columns:1fr;}
   .seasoning-input-row{grid-template-columns:1fr;}
   .day-row{grid-template-columns:1fr;}
+  .plan-view-day-row{grid-template-columns:1fr;}
   .card-actions{flex-wrap:wrap}
 }

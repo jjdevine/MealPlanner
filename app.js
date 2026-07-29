@@ -854,11 +854,200 @@
         actions.appendChild(deleteBtn);
       }
 
+      const toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = "toggle-detail";
+      toggleBtn.textContent = "Show details";
+      actions.appendChild(toggleBtn);
+
+      const detail = document.createElement("div");
+      detail.className = "plan-view-detail hidden";
+
+      let detailLoaded = false;
+      toggleBtn.addEventListener("click", async () => {
+        const isHidden = detail.classList.contains("hidden");
+        if (isHidden) {
+          detail.classList.remove("hidden");
+          toggleBtn.textContent = "Hide details";
+          if (!detailLoaded) {
+            detailLoaded = true;
+            await renderPlanViewDetail(plan, detail);
+          }
+        } else {
+          detail.classList.add("hidden");
+          toggleBtn.textContent = "Show details";
+        }
+      });
+
       card.appendChild(top);
       card.appendChild(range);
       card.appendChild(actions);
+      card.appendChild(detail);
       list.appendChild(card);
     });
+  }
+
+  async function renderPlanViewDetail(plan, container) {
+    container.innerHTML = '<p class="message info">Loading\u2026</p>';
+
+    let entries = [];
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .schema(APP_SCHEMA)
+          .from("meal_plan_entries")
+          .select("id, day_index, scheduled_date, meal_id, portions")
+          .eq("period_id", plan.id)
+          .order("day_index", { ascending: true });
+        if (error) throw error;
+        entries = data || [];
+      } catch (err) {
+        container.innerHTML = '<p class="message error">Failed to load plan details.</p>';
+        return;
+      }
+    }
+
+    container.innerHTML = "";
+    const today = nowDateIso();
+    const entriesMap = new Map();
+    entries.forEach((e) => entriesMap.set(e.day_index, e));
+
+    // Day breakdown
+    const daysHeading = document.createElement("p");
+    daysHeading.className = "plan-view-section-title";
+    daysHeading.textContent = "Day Breakdown";
+    container.appendChild(daysHeading);
+
+    const daysGrid = document.createElement("div");
+    daysGrid.className = "plan-view-days-grid";
+
+    for (let i = 0; i < plan.days_count; i++) {
+      const scheduledDate = addDays(plan.start_date, i);
+      const isPast = scheduledDate < today;
+      const entry = entriesMap.get(i);
+      const meal = entry && entry.meal_id ? getMealById(entry.meal_id) : null;
+
+      const dayRow = document.createElement("div");
+      dayRow.className = "plan-view-day-row" + (isPast ? " past" : "");
+
+      const dayLabel = document.createElement("span");
+      dayLabel.className = "plan-view-day-label";
+      dayLabel.textContent = "Day " + (i + 1) + " \u2013 " + formatDate(scheduledDate);
+
+      const mealName = document.createElement("span");
+      mealName.className = "plan-view-day-meal" + (meal ? "" : " no-meal");
+      mealName.textContent = meal ? meal.name : "No meal assigned";
+
+      const portionsSpan = document.createElement("span");
+      portionsSpan.className = "plan-view-day-portions";
+      portionsSpan.textContent = meal && entry && entry.portions ? entry.portions + " portions" : "";
+
+      dayRow.appendChild(dayLabel);
+      dayRow.appendChild(mealName);
+      dayRow.appendChild(portionsSpan);
+      daysGrid.appendChild(dayRow);
+    }
+    container.appendChild(daysGrid);
+
+    // Shopping list (upcoming days only)
+    const shoppingHeading = document.createElement("p");
+    shoppingHeading.className = "plan-view-section-title";
+    shoppingHeading.textContent = "Shopping List";
+    container.appendChild(shoppingHeading);
+
+    const shoppingNote = document.createElement("p");
+    shoppingNote.className = "plan-view-shopping-note";
+    shoppingNote.textContent = "Includes only today and upcoming days \u2014 past days are excluded.";
+    container.appendChild(shoppingNote);
+
+    const ingredientTotals = new Map();
+    const condimentNames = new Map();
+
+    for (let i = 0; i < plan.days_count; i++) {
+      const scheduledDate = addDays(plan.start_date, i);
+      if (scheduledDate < today) continue;
+
+      const entry = entriesMap.get(i);
+      if (!entry || !entry.meal_id) continue;
+      const meal = getMealById(entry.meal_id);
+      if (!meal) continue;
+      const portions = entry.portions ? Number(entry.portions) : NaN;
+      if (!Number.isFinite(portions) || portions <= 0) continue;
+
+      const basePortions = getMealMinimumPortions(meal);
+      const multiplier = portions / basePortions;
+      if (!Number.isFinite(multiplier) || multiplier <= 0) continue;
+
+      (meal.meal_ingredients || []).forEach((ingredient) => {
+        const quantity = Number(ingredient.quantity);
+        if (!Number.isFinite(quantity) || quantity <= 0) return;
+        const name = String(ingredient.ingredient_name || "").trim();
+        const unit = String(ingredient.unit || "").trim();
+        if (!name || !unit) return;
+        const key = name.toLowerCase() + "|" + unit.toLowerCase();
+        const existing = ingredientTotals.get(key);
+        const totalQuantity = quantity * multiplier;
+        if (existing) {
+          existing.quantity += totalQuantity;
+        } else {
+          ingredientTotals.set(key, { name, unit, quantity: totalQuantity });
+        }
+      });
+
+      (meal.seasoning_tags || []).forEach((tag) => {
+        const name = String(tag.name || "").trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (!condimentNames.has(key)) condimentNames.set(key, name);
+      });
+    }
+
+    const ingredientRows = Array.from(ingredientTotals.values()).sort((a, b) => {
+      const c = a.name.localeCompare(b.name);
+      return c !== 0 ? c : a.unit.localeCompare(b.unit);
+    });
+
+    if (!ingredientRows.length && !condimentNames.size) {
+      const empty = document.createElement("p");
+      empty.className = "message info";
+      empty.textContent = "No upcoming meals with ingredients assigned.";
+      container.appendChild(empty);
+      return;
+    }
+
+    if (ingredientRows.length) {
+      const ingTitle = document.createElement("p");
+      ingTitle.className = "shopping-section-title";
+      ingTitle.textContent = "Ingredients";
+      container.appendChild(ingTitle);
+
+      const ingList = document.createElement("ul");
+      ingList.className = "shopping-list";
+      ingredientRows.forEach((ingredient) => {
+        const item = document.createElement("li");
+        item.textContent = formatQuantity(ingredient.quantity) + " " + ingredient.unit + " " + ingredient.name;
+        ingList.appendChild(item);
+      });
+      container.appendChild(ingList);
+    }
+
+    if (condimentNames.size) {
+      const condTitle = document.createElement("p");
+      condTitle.className = "shopping-section-title";
+      condTitle.textContent = "Condiments and Garnishes";
+      container.appendChild(condTitle);
+
+      const condList = document.createElement("ul");
+      condList.className = "shopping-list";
+      Array.from(condimentNames.values())
+        .sort((a, b) => a.localeCompare(b))
+        .forEach((name) => {
+          const item = document.createElement("li");
+          item.textContent = name;
+          condList.appendChild(item);
+        });
+      container.appendChild(condList);
+    }
   }
 
   function getSelectedPlan() {
