@@ -63,11 +63,8 @@
         <form id="meal-form" class="stack-form">
           <input id="meal-name" type="text" placeholder="Meal name" required maxlength="120">
           <div class="inline-field">
-            <label class="checkbox-row">
-              <input id="meal-adjustable" type="checkbox" checked>
-              <span>Portions can be adjusted</span>
-            </label>
-            <input id="meal-fixed-portions" type="number" min="1" step="1" placeholder="Fixed portions (required when non-adjustable)">
+            <label for="meal-min-portions">Minimum portions prepared at once</label>
+            <input id="meal-min-portions" type="number" min="1" step="1" value="1" required>
           </div>
 
           <div class="ingredients-block">

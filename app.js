@@ -132,6 +132,12 @@
     return date.toISOString().slice(0, 10);
   }
 
+  function getMealMinimumPortions(meal) {
+    const fixedPortions = meal ? Number(meal.fixed_portions) : NaN;
+    if (Number.isFinite(fixedPortions) && fixedPortions > 0) return fixedPortions;
+    return 1;
+  }
+
   function ingredientRowTemplate(values) {
     const row = document.createElement("div");
     row.className = "ingredient-row";
@@ -291,9 +297,8 @@
 
   function readMealForm() {
     const name = $("#meal-name").value.trim();
-    const adjustable = $("#meal-adjustable").checked;
-    const fixedRaw = $("#meal-fixed-portions").value;
-    const fixedPortions = fixedRaw ? Number(fixedRaw) : null;
+    const minimumRaw = $("#meal-min-portions").value;
+    const minimumPortions = minimumRaw ? Number(minimumRaw) : null;
 
     const ingredients = Array.from(document.querySelectorAll("#ingredient-rows .ingredient-row"))
       .map((row, idx) => {
@@ -311,8 +316,7 @@
 
     return {
       name,
-      allows_portion_adjustment: adjustable,
-      fixed_portions: adjustable ? null : fixedPortions,
+      minimum_portions: minimumPortions,
       ingredients,
       seasoning_tag_names: selectedSeasoningTags.map((tag) => normalizeTagName(tag.name)).filter(Boolean),
     };
@@ -320,8 +324,8 @@
 
   function validateMealPayload(payload) {
     if (!payload.name) return "Meal name is required.";
-    if (!payload.allows_portion_adjustment && (!payload.fixed_portions || payload.fixed_portions < 1)) {
-      return "Fixed portions are required for non-adjustable meals.";
+    if (!payload.minimum_portions || payload.minimum_portions < 1) {
+      return "Minimum portions must be at least 1.";
     }
     if (!payload.ingredients.length) return "At least one ingredient is required.";
     return null;
@@ -379,9 +383,7 @@
   function mealCardTemplate(meal) {
     const editable = canEditMeal(meal);
     const ownerText = editable ? "Created by you" : "Created by another user";
-    const portionRule = meal.allows_portion_adjustment
-      ? "Portions: adjustable"
-      : "Portions: fixed at " + meal.fixed_portions;
+    const portionRule = "Minimum portions: " + getMealMinimumPortions(meal);
 
     const card = document.createElement("article");
     card.className = "meal-card";
@@ -466,12 +468,16 @@
     try {
       const seasoningTagRecords = await ensureSeasoningTagRecords(payload.seasoning_tag_names);
       if (!editingMealId) {
+        const minimumPortions = payload.minimum_portions;
+        const mealPortionFields =
+          minimumPortions <= 1
+            ? { allows_portion_adjustment: true, fixed_portions: null }
+            : { allows_portion_adjustment: false, fixed_portions: minimumPortions };
         const mealInsert = {
           id: uuid(),
           owner_user_id: currentUser.id,
           name: payload.name,
-          allows_portion_adjustment: payload.allows_portion_adjustment,
-          fixed_portions: payload.fixed_portions,
+          ...mealPortionFields,
         };
 
         const mealResult = await supabase.schema(APP_SCHEMA).from("meals").insert(mealInsert).select("id").single();
@@ -513,8 +519,9 @@
           .from("meals")
           .update({
             name: payload.name,
-            allows_portion_adjustment: payload.allows_portion_adjustment,
-            fixed_portions: payload.fixed_portions,
+            ...(payload.minimum_portions <= 1
+              ? { allows_portion_adjustment: true, fixed_portions: null }
+              : { allows_portion_adjustment: false, fixed_portions: payload.minimum_portions }),
           })
           .eq("id", editingMealId);
         if (updateResult.error) throw updateResult.error;
@@ -563,8 +570,7 @@
 
     editingMealId = meal.id;
     $("#meal-name").value = meal.name;
-    $("#meal-adjustable").checked = !!meal.allows_portion_adjustment;
-    $("#meal-fixed-portions").value = meal.fixed_portions || "";
+    $("#meal-min-portions").value = String(getMealMinimumPortions(meal));
     $("#save-meal-btn").textContent = "Update Meal";
 
     $("#ingredient-rows").innerHTML = "";
@@ -781,12 +787,12 @@
       mealSelect.addEventListener("change", () => {
         const selectedMeal = getMealById(mealSelect.value);
         const portionsInput = wrapper.querySelector("input[type=number]");
-
-        if (selectedMeal && !selectedMeal.allows_portion_adjustment) {
-          portionsInput.value = selectedMeal.fixed_portions || "";
-          portionsInput.disabled = true;
-        } else {
-          portionsInput.disabled = false;
+        if (selectedMeal) {
+          const minimumPortions = getMealMinimumPortions(selectedMeal);
+          const currentPortions = portionsInput.value ? Number(portionsInput.value) : null;
+          if (!currentPortions || currentPortions < minimumPortions) {
+            portionsInput.value = String(minimumPortions);
+          }
         }
 
         const existing = dayDrafts[String(row.day_index)] || {};
@@ -800,14 +806,17 @@
 
       const portions = document.createElement("input");
       portions.type = "number";
-      portions.min = "0.5";
+      portions.min = "1";
       portions.step = "0.5";
       portions.placeholder = "Portions";
       portions.value = row.portions;
       const selectedMeal = getMealById(row.meal_id);
-      if (selectedMeal && !selectedMeal.allows_portion_adjustment) {
-        portions.value = selectedMeal.fixed_portions || "";
-        portions.disabled = true;
+      if (selectedMeal) {
+        const minimumPortions = getMealMinimumPortions(selectedMeal);
+        const currentPortions = portions.value ? Number(portions.value) : null;
+        if (!currentPortions || currentPortions < minimumPortions) {
+          portions.value = String(minimumPortions);
+        }
       }
       portions.addEventListener("input", () => {
         const existing = dayDrafts[String(row.day_index)] || {};
@@ -854,12 +863,16 @@
 
       const meal = getMealById(draft.meal_id);
       let portions = draft.portions ? Number(draft.portions) : null;
-      if (meal && !meal.allows_portion_adjustment) {
-        portions = meal.fixed_portions;
-      }
       if (!portions || portions <= 0) {
         setStatus("Portions must be greater than zero.", "error");
         return;
+      }
+      if (meal) {
+        const minimumPortions = getMealMinimumPortions(meal);
+        if (portions < minimumPortions) {
+          setStatus("Portions must be at least " + minimumPortions + " for this meal.", "error");
+          return;
+        }
       }
 
       const upsertResult = await supabase
@@ -903,7 +916,7 @@
     const rows = [];
     for (let day = 0; day < plan.days_count; day += 1) {
       const meal = rotated[day % rotated.length];
-      const portions = meal.allows_portion_adjustment ? 1 : meal.fixed_portions;
+      const portions = getMealMinimumPortions(meal);
       rows.push({
         id: uuid(),
         period_id: selectedPlanId,
@@ -1058,12 +1071,6 @@
     });
     $("#clear-meal-form").addEventListener("click", resetMealForm);
     $("#meal-form").addEventListener("submit", saveMeal);
-
-    $("#meal-adjustable").addEventListener("change", () => {
-      if ($("#meal-adjustable").checked) {
-        $("#meal-fixed-portions").value = "";
-      }
-    });
 
     $("#plan-form").addEventListener("submit", createPlan);
 
