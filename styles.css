@@ -103,8 +103,9 @@ input,select,textarea{background:var(--surface-2);color:var(--text);border:1px s
 .user-email{font-size:.9rem;color:var(--muted)}
 
 .tab-row{margin:1rem 0}
-.tab-btn{background:#1e2420}
-.tab-btn.active{background:#253028;border-color:#3a5040}
+.tab-btn{background:#253028;border-color:#3d5043;color:var(--text)}
+.tab-btn:hover{background:#2e3c31;border-color:#4a6050}
+.tab-btn.active{background:#1f4a30;border-color:var(--brand);color:var(--brand)}
 
 .view-panel{display:none}
 .view-panel.active{display:block}
@@ -136,9 +137,9 @@ input,select,textarea{background:var(--surface-2);color:var(--text);border:1px s
 .ingredient-chip{font-size:.84rem;background:#1e2420;border:1px solid #2d3a30;border-radius:999px;padding:.2rem .55rem;display:inline-flex;margin-right:.35rem;margin-bottom:.35rem}
 .seasoning-chip{font-size:.84rem;background:#1a2e22;border:1px solid #2e5040;border-radius:999px;padding:.2rem .55rem;display:inline-flex;margin-right:.35rem;margin-bottom:.35rem}
 .card-actions{margin-top:.6rem;display:flex;gap:.45rem}
-.card-actions button{border-radius:999px;border:1px solid var(--border);padding:.3rem .7rem;cursor:pointer}
-.card-actions .edit{background:#1a2e22;color:#5dc98a}
-.card-actions .delete{background:#3a1f1f;color:#e08888}
+.card-actions button{border-radius:999px;border:1px solid var(--border);padding:.3rem .7rem;cursor:pointer;color:var(--text)}
+.card-actions .edit{background:#1f4028;color:#6de09a;border-color:#3a6048}
+.card-actions .delete{background:#4a2020;color:#f09090;border-color:#6a3030}
 
 .plan-picker{display:grid;gap:.35rem;margin:.8rem 0}
 .plan-mode-toggle{display:flex;gap:.5rem;margin:.4rem 0 .8rem}
@@ -148,9 +149,9 @@ input,select,textarea{background:var(--surface-2);color:var(--text);border:1px s
 .plan-list-card-status{font-size:.83rem;color:var(--muted);margin-top:.25rem}
 .plan-list-card-range{font-size:.83rem;color:var(--muted)}
 .plan-list-actions{margin-top:.6rem;display:flex;gap:.45rem;flex-wrap:wrap}
-.plan-list-actions button{border-radius:999px;border:1px solid var(--border);padding:.3rem .7rem;cursor:pointer}
-.plan-list-actions .edit{background:#1a2e22;color:#5dc98a}
-.plan-list-actions .delete{background:#3a1f1f;color:#e08888}
+.plan-list-actions button{border-radius:999px;border:1px solid var(--border);padding:.3rem .7rem;cursor:pointer;color:var(--text)}
+.plan-list-actions .edit{background:#1f4028;color:#6de09a;border-color:#3a6048}
+.plan-list-actions .delete{background:#4a2020;color:#f09090;border-color:#6a3030}
 .plan-days-grid{display:grid;gap:.6rem;margin-top:.9rem}
 .day-row{display:grid;grid-template-columns:1.2fr 1.8fr 1fr auto;gap:.45rem;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.55rem}
 .day-label{font-weight:600}
@@ -178,7 +179,7 @@ input,select,textarea{background:var(--surface-2);color:var(--text);border:1px s
   font-size:.82rem;color:var(--muted);background:#1a2e22;
   border:1px solid #2e5040;border-radius:8px;padding:.35rem .6rem;
 }
-.plan-list-actions .toggle-detail{background:#1e2420;color:var(--text)}
+.plan-list-actions .toggle-detail{background:#253028;color:var(--text);border-color:#3d5043}
 
 @media (max-width: 760px){
   .ingredient-row{grid-template-columns:1fr;}
