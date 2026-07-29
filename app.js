@@ -39,6 +39,8 @@
   let plans = [];
   let selectedPlanId = null;
   let dayDrafts = {};
+  let planMode = "view";
+  let showHistoricPlans = false;
 
   function nowDateIso() {
     return new Date().toISOString().slice(0, 10);
@@ -130,6 +132,28 @@
     const date = new Date(startDate + "T00:00:00");
     date.setDate(date.getDate() + add);
     return date.toISOString().slice(0, 10);
+  }
+
+  function getPlanEndDate(plan) {
+    if (!plan || !plan.start_date || !plan.days_count) return "";
+    return addDays(plan.start_date, Number(plan.days_count) - 1);
+  }
+
+  function getPlanTiming(plan) {
+    const today = nowDateIso();
+    const startDate = String(plan ? plan.start_date : "");
+    const endDate = getPlanEndDate(plan);
+    if (!startDate || !endDate) return "historic";
+    if (startDate <= today && endDate >= today) return "current";
+    if (startDate > today) return "future";
+    return "historic";
+  }
+
+  function getPlanTimingOrder(plan) {
+    const timing = getPlanTiming(plan);
+    if (timing === "current") return 0;
+    if (timing === "future") return 1;
+    return 2;
   }
 
   function getMealMinimumPortions(meal) {
@@ -630,11 +654,17 @@
       .schema(APP_SCHEMA)
       .from("meal_plan_periods")
       .select("id, owner_user_id, title, start_date, days_count, people_count, same_meal_for_all, created_at, updated_at")
-      .order("start_date", { ascending: false });
+      .order("start_date", { ascending: true });
 
     if (error) throw error;
 
-    plans = data || [];
+    plans = (data || []).slice().sort((a, b) => {
+      const timingOrder = getPlanTimingOrder(a) - getPlanTimingOrder(b);
+      if (timingOrder !== 0) return timingOrder;
+      const startCompare = String(a.start_date).localeCompare(String(b.start_date));
+      if (startCompare !== 0) return startCompare;
+      return String(a.title || "").localeCompare(String(b.title || ""));
+    });
     const select = $("#plan-select");
     select.innerHTML = "";
 
@@ -644,6 +674,7 @@
       option.value = "";
       option.textContent = "No plans yet";
       select.appendChild(option);
+      renderPlanList();
       renderPlanDays();
       return;
     }
@@ -659,6 +690,7 @@
       selectedPlanId = plans[0].id;
     }
     select.value = selectedPlanId;
+    renderPlanList();
     await loadPlanEntries(selectedPlanId);
   }
 
@@ -736,6 +768,99 @@
     renderPlanDays();
   }
 
+  function canEditPlan(plan) {
+    return !!(currentUser && plan && plan.owner_user_id === currentUser.id);
+  }
+
+  function getVisiblePlans() {
+    if (showHistoricPlans) return plans.slice();
+    return plans.filter((plan) => getPlanTiming(plan) !== "historic");
+  }
+
+  function getPlanTimingLabel(plan) {
+    const timing = getPlanTiming(plan);
+    if (timing === "current") return "Current";
+    if (timing === "future") return "Upcoming";
+    return "Historic";
+  }
+
+  function setPlanMode(mode) {
+    planMode = mode === "edit" ? "edit" : "view";
+    $("#plan-view-mode-btn").classList.toggle("active", planMode === "view");
+    $("#plan-edit-mode-btn").classList.toggle("active", planMode === "edit");
+    $("#plan-view-mode-panel").classList.toggle("hidden", planMode !== "view");
+    $("#plan-edit-mode-panel").classList.toggle("hidden", planMode !== "edit");
+  }
+
+  function renderPlanList() {
+    const list = $("#plan-list-view");
+    list.innerHTML = "";
+
+    const visiblePlans = getVisiblePlans();
+    if (!visiblePlans.length) {
+      const empty = document.createElement("p");
+      empty.className = "message info";
+      empty.textContent = showHistoricPlans
+        ? "No meal plans found."
+        : "No current or upcoming plans. Turn on historic plans to see older plans.";
+      list.appendChild(empty);
+      return;
+    }
+
+    visiblePlans.forEach((plan) => {
+      const card = document.createElement("article");
+      card.className = "plan-list-card";
+
+      const top = document.createElement("div");
+      top.className = "plan-list-card-top";
+      const title = document.createElement("h3");
+      title.textContent = plan.title;
+      const status = document.createElement("p");
+      status.className = "plan-list-card-status";
+      status.textContent = getPlanTimingLabel(plan);
+      top.appendChild(title);
+      top.appendChild(status);
+
+      const range = document.createElement("p");
+      range.className = "plan-list-card-range";
+      range.textContent =
+        formatDate(plan.start_date) +
+        " - " +
+        formatDate(getPlanEndDate(plan)) +
+        " (" +
+        plan.days_count +
+        " days)";
+
+      const actions = document.createElement("div");
+      actions.className = "plan-list-actions";
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "edit";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", async () => {
+        selectedPlanId = plan.id;
+        $("#plan-select").value = selectedPlanId;
+        await loadPlanEntries(selectedPlanId);
+        setPlanMode("edit");
+      });
+      actions.appendChild(editBtn);
+
+      if (canEditPlan(plan)) {
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "delete";
+        deleteBtn.textContent = "Delete";
+        deleteBtn.addEventListener("click", async () => deletePlan(plan.id));
+        actions.appendChild(deleteBtn);
+      }
+
+      card.appendChild(top);
+      card.appendChild(range);
+      card.appendChild(actions);
+      list.appendChild(card);
+    });
+  }
+
   function getSelectedPlan() {
     return plans.find((plan) => plan.id === selectedPlanId) || null;
   }
@@ -785,6 +910,10 @@
     const grid = $("#plan-days-grid");
     grid.innerHTML = "";
     const plan = getSelectedPlan();
+    const deletePlanBtn = $("#delete-plan-btn");
+    if (deletePlanBtn) {
+      deletePlanBtn.disabled = !plan || !canEditPlan(plan);
+    }
 
     if (!plan) {
       const empty = document.createElement("p");
@@ -1112,6 +1241,29 @@
     }
   }
 
+  async function deletePlan(planId) {
+    const plan = plans.find((item) => item.id === planId);
+    if (!plan || !canEditPlan(plan)) return;
+
+    const confirmed = window.confirm("Delete this plan and all assigned days?");
+    if (!confirmed) return;
+
+    try {
+      const result = await supabase.schema(APP_SCHEMA).from("meal_plan_periods").delete().eq("id", planId);
+      if (result.error) throw result.error;
+      if (selectedPlanId === planId) {
+        selectedPlanId = null;
+        dayDrafts = {};
+      }
+      await loadPlans();
+      setPlanMode("view");
+      setStatus("Plan deleted.", "success");
+    } catch (error) {
+      console.error(error);
+      setStatus(error.message || "Failed to delete plan.", "error");
+    }
+  }
+
   function refreshMealPickers() {
     const select = $("#plan-select");
     if (select && plans.length && selectedPlanId) {
@@ -1207,6 +1359,11 @@
       plans = [];
       selectedPlanId = null;
       dayDrafts = {};
+      planMode = "view";
+      showHistoricPlans = false;
+      $("#show-historic-plans").checked = false;
+      setPlanMode("view");
+      renderPlanList();
       updateSeasoningTagSuggestions();
       renderSelectedSeasoningTags();
       setScreen("auth");
@@ -1228,6 +1385,12 @@
     $("#meal-form").addEventListener("submit", saveMeal);
 
     $("#plan-form").addEventListener("submit", createPlan);
+    $("#plan-view-mode-btn").addEventListener("click", () => setPlanMode("view"));
+    $("#plan-edit-mode-btn").addEventListener("click", () => setPlanMode("edit"));
+    $("#show-historic-plans").addEventListener("change", (event) => {
+      showHistoricPlans = !!event.target.checked;
+      renderPlanList();
+    });
 
     $("#plan-select").addEventListener("change", async (event) => {
       selectedPlanId = event.target.value || null;
@@ -1236,10 +1399,15 @@
 
     $("#auto-suggest-btn").addEventListener("click", autoSuggestMeals);
     $("#clear-plan-btn").addEventListener("click", clearPlanDays);
+    $("#delete-plan-btn").addEventListener("click", async () => {
+      if (!selectedPlanId) return;
+      await deletePlan(selectedPlanId);
+    });
   }
 
   async function start() {
     bindEvents();
+    setPlanMode("view");
     $("#plan-start").value = nowDateIso();
     addIngredientRow();
     renderSelectedSeasoningTags();
