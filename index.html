@@ -107,42 +107,58 @@
           <p class="subtitle">Create an upcoming meal period and fill days manually or automatically.</p>
         </div>
 
-        <form id="plan-form" class="stack-form">
-          <input id="plan-title" type="text" placeholder="Plan title (example: Next Week)" required maxlength="120">
-          <div class="inline-field">
-            <label for="plan-start">Start date</label>
-            <input id="plan-start" type="date" required>
-          </div>
-          <div class="inline-field">
-            <label for="plan-days">Days in plan</label>
-            <input id="plan-days" type="number" min="1" max="60" value="7" required>
-          </div>
-          <div class="inline-field">
-            <label for="plan-people-count">People</label>
-            <input id="plan-people-count" type="number" min="1" step="1" value="1" required>
-          </div>
-          <label class="checkbox-row" for="plan-same-meal-all">
-            <input id="plan-same-meal-all" type="checkbox" checked>
-            Same meal for all people
+        <div class="plan-mode-toggle">
+          <button id="plan-view-mode-btn" type="button" class="tab-btn active">View</button>
+          <button id="plan-edit-mode-btn" type="button" class="tab-btn">Edit</button>
+        </div>
+
+        <section id="plan-view-mode-panel" class="plan-mode-panel">
+          <label class="checkbox-row" for="show-historic-plans">
+            <input id="show-historic-plans" type="checkbox">
+            Show historic plans
           </label>
-          <div class="form-actions">
-            <button id="create-plan-btn" type="submit" class="btn-primary">Create Plan</button>
+          <div id="plan-list-view" class="card-grid"></div>
+        </section>
+
+        <section id="plan-edit-mode-panel" class="plan-mode-panel hidden">
+          <form id="plan-form" class="stack-form">
+            <input id="plan-title" type="text" placeholder="Plan title (example: Next Week)" required maxlength="120">
+            <div class="inline-field">
+              <label for="plan-start">Start date</label>
+              <input id="plan-start" type="date" required>
+            </div>
+            <div class="inline-field">
+              <label for="plan-days">Days in plan</label>
+              <input id="plan-days" type="number" min="1" max="60" value="7" required>
+            </div>
+            <div class="inline-field">
+              <label for="plan-people-count">People</label>
+              <input id="plan-people-count" type="number" min="1" step="1" value="1" required>
+            </div>
+            <label class="checkbox-row" for="plan-same-meal-all">
+              <input id="plan-same-meal-all" type="checkbox" checked>
+              Same meal for all people
+            </label>
+            <div class="form-actions">
+              <button id="create-plan-btn" type="submit" class="btn-primary">Create Plan</button>
+            </div>
+            <p id="plan-form-message" class="message hidden"></p>
+          </form>
+
+          <div class="plan-picker">
+            <label for="plan-select">Select plan</label>
+            <select id="plan-select"></select>
           </div>
-          <p id="plan-form-message" class="message hidden"></p>
-        </form>
 
-        <div class="plan-picker">
-          <label for="plan-select">Select plan</label>
-          <select id="plan-select"></select>
-        </div>
+          <div class="plan-actions">
+            <button id="auto-suggest-btn" type="button" class="btn-secondary">Auto Suggest Meals</button>
+            <button id="clear-plan-btn" type="button" class="btn-secondary">Clear Plan Days</button>
+            <button id="delete-plan-btn" type="button" class="btn-secondary">Delete Plan</button>
+          </div>
 
-        <div class="plan-actions">
-          <button id="auto-suggest-btn" type="button" class="btn-secondary">Auto Suggest Meals</button>
-          <button id="clear-plan-btn" type="button" class="btn-secondary">Clear Plan Days</button>
-        </div>
-
-        <div id="plan-days-grid" class="plan-days-grid"></div>
-        <div id="plan-shopping-summary" class="plan-shopping-summary"></div>
+          <div id="plan-days-grid" class="plan-days-grid"></div>
+          <div id="plan-shopping-summary" class="plan-shopping-summary"></div>
+        </section>
       </section>
     </section>
   </div>
