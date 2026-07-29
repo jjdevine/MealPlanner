@@ -138,6 +138,27 @@
     return 1;
   }
 
+  function getPlanPeopleCount(plan) {
+    const peopleCount = Number(plan ? plan.people_count : NaN);
+    if (Number.isFinite(peopleCount) && peopleCount > 0) return peopleCount;
+    return 1;
+  }
+
+  function shouldUseSameMealForAll(plan) {
+    return !plan || plan.same_meal_for_all !== false;
+  }
+
+  function getDefaultPlanPortions(meal, plan) {
+    const minimumPortions = getMealMinimumPortions(meal);
+    if (!shouldUseSameMealForAll(plan)) return minimumPortions;
+    return Math.max(minimumPortions, getPlanPeopleCount(plan));
+  }
+
+  function formatQuantity(value) {
+    if (!Number.isFinite(value)) return "0";
+    return String(Number.parseFloat(value.toFixed(3)));
+  }
+
   function ingredientRowTemplate(values) {
     const row = document.createElement("div");
     row.className = "ingredient-row";
@@ -608,7 +629,7 @@
     const { data, error } = await supabase
       .schema(APP_SCHEMA)
       .from("meal_plan_periods")
-      .select("id, owner_user_id, title, start_date, days_count, created_at, updated_at")
+      .select("id, owner_user_id, title, start_date, days_count, people_count, same_meal_for_all, created_at, updated_at")
       .order("start_date", { ascending: false });
 
     if (error) throw error;
@@ -648,9 +669,11 @@
     const title = $("#plan-title").value.trim();
     const startDate = $("#plan-start").value;
     const daysCount = Number($("#plan-days").value);
+    const peopleCount = Number($("#plan-people-count").value);
+    const sameMealForAll = $("#plan-same-meal-all").checked;
 
-    if (!title || !startDate || !daysCount || daysCount < 1) {
-      showPlanFormMessage("Title, start date, and day count are required.", "error");
+    if (!title || !startDate || !daysCount || daysCount < 1 || !peopleCount || peopleCount < 1) {
+      showPlanFormMessage("Title, start date, day count, and people count are required.", "error");
       return;
     }
 
@@ -664,6 +687,8 @@
           title,
           start_date: startDate,
           days_count: daysCount,
+          people_count: peopleCount,
+          same_meal_for_all: sameMealForAll,
         })
         .select("id")
         .single();
@@ -672,6 +697,8 @@
 
       $("#plan-form").reset();
       $("#plan-days").value = "7";
+      $("#plan-people-count").value = "1";
+      $("#plan-same-meal-all").checked = true;
       showPlanFormMessage("Plan created.", "success");
       selectedPlanId = insert.data.id;
       await loadPlans();
@@ -764,6 +791,7 @@
       empty.className = "message info";
       empty.textContent = "Create a plan to start assigning meals.";
       grid.appendChild(empty);
+      renderPlanShoppingSummary();
       return;
     }
 
@@ -772,6 +800,7 @@
       emptyMeals.className = "message info";
       emptyMeals.textContent = "Add meals before building a plan.";
       grid.appendChild(emptyMeals);
+      renderPlanShoppingSummary();
       return;
     }
 
@@ -783,15 +812,36 @@
       label.className = "day-label";
       label.textContent = "Day " + (row.day_index + 1) + " - " + formatDate(row.scheduled_date);
 
+      const mealField = document.createElement("div");
+      mealField.className = "day-input-field";
+      const mealFieldLabel = document.createElement("label");
+      mealFieldLabel.className = "day-input-label";
+      mealFieldLabel.textContent = "Meal";
       const mealSelect = createMealSelect(row.meal_id);
+      mealField.appendChild(mealFieldLabel);
+      mealField.appendChild(mealSelect);
+
+      const portionsField = document.createElement("div");
+      portionsField.className = "day-input-field";
+      const portionsLabel = document.createElement("label");
+      portionsLabel.className = "day-input-label";
+      portionsLabel.textContent = "Portions";
+      const portions = document.createElement("input");
+      portions.type = "number";
+      portions.min = "1";
+      portions.step = "0.5";
+      portions.placeholder = "Portions";
+      portions.value = row.portions;
+      portionsField.appendChild(portionsLabel);
+      portionsField.appendChild(portions);
+
       mealSelect.addEventListener("change", () => {
         const selectedMeal = getMealById(mealSelect.value);
-        const portionsInput = wrapper.querySelector("input[type=number]");
         if (selectedMeal) {
-          const minimumPortions = getMealMinimumPortions(selectedMeal);
-          const currentPortions = portionsInput.value ? Number(portionsInput.value) : null;
-          if (!currentPortions || currentPortions < minimumPortions) {
-            portionsInput.value = String(minimumPortions);
+          const defaultPortions = getDefaultPlanPortions(selectedMeal, plan);
+          const currentPortions = portions.value ? Number(portions.value) : null;
+          if (!currentPortions || currentPortions < defaultPortions) {
+            portions.value = String(defaultPortions);
           }
         }
 
@@ -800,19 +850,14 @@
           ...existing,
           meal_id: mealSelect.value,
           scheduled_date: row.scheduled_date,
-          portions: portionsInput.value,
+          portions: portions.value,
         };
+        renderPlanShoppingSummary();
       });
 
-      const portions = document.createElement("input");
-      portions.type = "number";
-      portions.min = "1";
-      portions.step = "0.5";
-      portions.placeholder = "Portions";
-      portions.value = row.portions;
       const selectedMeal = getMealById(row.meal_id);
       if (selectedMeal) {
-        const minimumPortions = getMealMinimumPortions(selectedMeal);
+        const minimumPortions = getDefaultPlanPortions(selectedMeal, plan);
         const currentPortions = portions.value ? Number(portions.value) : null;
         if (!currentPortions || currentPortions < minimumPortions) {
           portions.value = String(minimumPortions);
@@ -826,6 +871,7 @@
           scheduled_date: row.scheduled_date,
           portions: portions.value,
         };
+        renderPlanShoppingSummary();
       });
 
       const saveButton = document.createElement("button");
@@ -835,11 +881,120 @@
       saveButton.addEventListener("click", () => saveDay(row.day_index, row.scheduled_date));
 
       wrapper.appendChild(label);
-      wrapper.appendChild(mealSelect);
-      wrapper.appendChild(portions);
+      wrapper.appendChild(mealField);
+      wrapper.appendChild(portionsField);
       wrapper.appendChild(saveButton);
       grid.appendChild(wrapper);
     });
+    renderPlanShoppingSummary();
+  }
+
+  function renderPlanShoppingSummary() {
+    const container = $("#plan-shopping-summary");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const plan = getSelectedPlan();
+    const heading = document.createElement("h3");
+    heading.textContent = "Shopping List";
+    container.appendChild(heading);
+
+    if (!plan) {
+      const empty = document.createElement("p");
+      empty.className = "message info";
+      empty.textContent = "Select a plan to view ingredient totals.";
+      container.appendChild(empty);
+      return;
+    }
+
+    const ingredientTotals = new Map();
+    const condimentNames = new Map();
+
+    buildDayRows().forEach((row) => {
+      if (!row.meal_id) return;
+      const meal = getMealById(row.meal_id);
+      if (!meal) return;
+      const portions = row.portions ? Number(row.portions) : NaN;
+      if (!Number.isFinite(portions) || portions <= 0) return;
+
+      const basePortions = getMealMinimumPortions(meal);
+      const multiplier = portions / basePortions;
+      if (!Number.isFinite(multiplier) || multiplier <= 0) return;
+
+      (meal.meal_ingredients || []).forEach((ingredient) => {
+        const quantity = Number(ingredient.quantity);
+        if (!Number.isFinite(quantity) || quantity <= 0) return;
+        const name = String(ingredient.ingredient_name || "").trim();
+        const unit = String(ingredient.unit || "").trim();
+        if (!name || !unit) return;
+
+        const key = name.toLowerCase() + "|" + unit.toLowerCase();
+        const existing = ingredientTotals.get(key);
+        const totalQuantity = quantity * multiplier;
+        if (existing) {
+          existing.quantity += totalQuantity;
+        } else {
+          ingredientTotals.set(key, { name, unit, quantity: totalQuantity });
+        }
+      });
+
+      (meal.seasoning_tags || []).forEach((tag) => {
+        const name = String(tag.name || "").trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (!condimentNames.has(key)) {
+          condimentNames.set(key, name);
+        }
+      });
+    });
+
+    const ingredientRows = Array.from(ingredientTotals.values()).sort((a, b) => {
+      const nameCompare = a.name.localeCompare(b.name);
+      if (nameCompare !== 0) return nameCompare;
+      return a.unit.localeCompare(b.unit);
+    });
+
+    if (!ingredientRows.length && !condimentNames.size) {
+      const empty = document.createElement("p");
+      empty.className = "message info";
+      empty.textContent = "Assign meals to plan days to generate your shopping list.";
+      container.appendChild(empty);
+      return;
+    }
+
+    if (ingredientRows.length) {
+      const ingredientTitle = document.createElement("p");
+      ingredientTitle.className = "shopping-section-title";
+      ingredientTitle.textContent = "Ingredients";
+      container.appendChild(ingredientTitle);
+
+      const ingredientList = document.createElement("ul");
+      ingredientList.className = "shopping-list";
+      ingredientRows.forEach((ingredient) => {
+        const item = document.createElement("li");
+        item.textContent = formatQuantity(ingredient.quantity) + " " + ingredient.unit + " " + ingredient.name;
+        ingredientList.appendChild(item);
+      });
+      container.appendChild(ingredientList);
+    }
+
+    if (condimentNames.size) {
+      const condimentTitle = document.createElement("p");
+      condimentTitle.className = "shopping-section-title";
+      condimentTitle.textContent = "Condiments and Garnishes";
+      container.appendChild(condimentTitle);
+
+      const condimentList = document.createElement("ul");
+      condimentList.className = "shopping-list";
+      Array.from(condimentNames.values())
+        .sort((a, b) => a.localeCompare(b))
+        .forEach((name) => {
+          const item = document.createElement("li");
+          item.textContent = name;
+          condimentList.appendChild(item);
+        });
+      container.appendChild(condimentList);
+    }
   }
 
   async function saveDay(dayIndex, scheduledDate) {
@@ -868,7 +1023,7 @@
         return;
       }
       if (meal) {
-        const minimumPortions = getMealMinimumPortions(meal);
+        const minimumPortions = getDefaultPlanPortions(meal, getSelectedPlan());
         if (portions < minimumPortions) {
           setStatus("Portions must be at least " + minimumPortions + " for this meal.", "error");
           return;
@@ -916,7 +1071,7 @@
     const rows = [];
     for (let day = 0; day < plan.days_count; day += 1) {
       const meal = rotated[day % rotated.length];
-      const portions = getMealMinimumPortions(meal);
+      const portions = getDefaultPlanPortions(meal, plan);
       rows.push({
         id: uuid(),
         period_id: selectedPlanId,
