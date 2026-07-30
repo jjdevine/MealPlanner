@@ -7,6 +7,7 @@ MealPlanner is a single-page web app modeled after the ToDoMobile architecture.
 - Meals with name, ingredient list, quantities, units, and reusable seasoning/garnish tags
 - Minimum portion size per meal (defaults to 1 and can be increased)
 - Meal plans over an adjustable number of days
+- Optional published meal plans visible to all authenticated users
 - Auto-suggest meals for the plan window
 - Manual day-by-day meal selection and portion editing
 - Supabase-backed multi-user support with ownership-safe editing
@@ -23,7 +24,8 @@ MealPlanner is a single-page web app modeled after the ToDoMobile architecture.
 
 - Meals: visible to all authenticated users.
 - Meals: editable only by the user who created them.
-- Meal plans: visible and editable only to the owner.
+- Meal plans: visible and editable only to the owner unless published.
+- Published meal plans: visible to all authenticated users, editable only by the owner.
 
 ## Files
 

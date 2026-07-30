@@ -52,6 +52,7 @@
       <div class="tab-row">
         <button id="open-meals-tab" type="button" class="tab-btn active">Meals</button>
         <button id="open-plans-tab" type="button" class="tab-btn">Meal Plans</button>
+        <button id="open-published-plans-tab" type="button" class="tab-btn">Published Meal Plans</button>
       </div>
 
       <section id="meals-panel" class="panel view-panel active">
@@ -104,7 +105,7 @@
       <section id="plans-panel" class="panel view-panel hidden">
         <div class="panel-heading">
           <h2>Meal Plans</h2>
-          <p class="subtitle">Create an upcoming meal period and fill days manually or automatically.</p>
+          <p class="subtitle">Create and manage your meal plans, then publish any plan you want to share.</p>
         </div>
 
         <div class="plan-mode-toggle">
@@ -149,6 +150,10 @@
               <input id="plan-same-meal-all" type="checkbox" checked>
               Same meal for all people
             </label>
+            <label class="checkbox-row" for="plan-published">
+              <input id="plan-published" type="checkbox">
+              Published
+            </label>
           </form>
 
           <div class="plan-actions">
@@ -164,6 +169,19 @@
           <p id="plan-form-message" class="message hidden"></p>
           <div id="plan-shopping-summary" class="plan-shopping-summary"></div>
         </section>
+      </section>
+
+      <section id="published-plans-panel" class="panel view-panel hidden">
+        <div class="panel-heading">
+          <h2>Published Meal Plans</h2>
+          <p class="subtitle">Browse meal plans shared by the community. Only the owner can edit them.</p>
+        </div>
+
+        <label class="checkbox-row" for="show-historic-published-plans">
+          <input id="show-historic-published-plans" type="checkbox">
+          Show historic plans
+        </label>
+        <div id="published-plan-list-view" class="card-grid"></div>
       </section>
     </section>
   </div>

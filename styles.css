@@ -148,9 +148,11 @@ input,select,textarea{background:var(--surface-2);color:var(--text);border:1px s
 .plan-list-card-top{display:flex;justify-content:space-between;gap:.7rem;align-items:flex-start}
 .plan-list-card-status{font-size:.83rem;color:var(--muted);margin-top:.25rem}
 .plan-list-card-range{font-size:.83rem;color:var(--muted)}
+.plan-list-card-owner{font-size:.83rem;color:var(--muted);margin-top:.2rem}
 .plan-list-actions{margin-top:.6rem;display:flex;gap:.45rem;flex-wrap:wrap}
 .plan-list-actions button{border-radius:999px;border:1px solid var(--border);padding:.3rem .7rem;cursor:pointer;color:var(--text)}
 .plan-list-actions .edit{background:#1f4028;color:#6de09a;border-color:#3a6048}
+.plan-list-actions .publish-toggle{background:#1b3b49;color:#8ed8f0;border-color:#2d6072}
 .plan-list-actions .delete{background:#4a2020;color:#f09090;border-color:#6a3030}
 .plan-days-grid{display:grid;gap:.6rem;margin-top:.9rem}
 .day-row{display:grid;grid-template-columns:1.2fr 1.8fr 1fr;gap:.45rem;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.55rem}

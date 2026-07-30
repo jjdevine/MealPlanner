@@ -6,9 +6,10 @@ Run these scripts in order using the Supabase SQL editor:
 2. 0002_enable_rls_and_policies.sql
 3. 0003_add_seasoning_tags.sql
 4. 0004_add_plan_generation_criteria.sql
+5. 0005_add_published_meal_plans.sql
 
 Notes:
 - The app uses a dedicated schema named mealplanner (not public).
 - Meal data is pooled for read access across authenticated users.
 - Users can only edit/delete their own meals.
-- Meal plans are private per user by default.
+- Meal plans are private per user by default unless published.

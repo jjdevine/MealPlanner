@@ -86,6 +86,13 @@
     el.textContent = "";
   }
 
+  function syncHistoricPlanCheckboxes() {
+    ["#show-historic-plans", "#show-historic-published-plans"].forEach((selector) => {
+      const checkbox = $(selector);
+      if (checkbox) checkbox.checked = showHistoricPlans;
+    });
+  }
+
   function setScreen(name) {
     $("#auth-screen").classList.toggle("active", name === "auth");
     $("#main-screen").classList.toggle("active", name === "main");
@@ -99,16 +106,23 @@
   function setMainTab(tabName) {
     const mealsTab = $("#open-meals-tab");
     const plansTab = $("#open-plans-tab");
+    const publishedPlansTab = $("#open-published-plans-tab");
     const mealsPanel = $("#meals-panel");
     const plansPanel = $("#plans-panel");
+    const publishedPlansPanel = $("#published-plans-panel");
 
     const mealsActive = tabName === "meals";
+    const plansActive = tabName === "plans";
+    const publishedActive = tabName === "published-plans";
     mealsTab.classList.toggle("active", mealsActive);
-    plansTab.classList.toggle("active", !mealsActive);
+    plansTab.classList.toggle("active", plansActive);
+    publishedPlansTab.classList.toggle("active", publishedActive);
     mealsPanel.classList.toggle("active", mealsActive);
     mealsPanel.classList.toggle("hidden", !mealsActive);
-    plansPanel.classList.toggle("active", !mealsActive);
-    plansPanel.classList.toggle("hidden", mealsActive);
+    plansPanel.classList.toggle("active", plansActive);
+    plansPanel.classList.toggle("hidden", !plansActive);
+    publishedPlansPanel.classList.toggle("active", publishedActive);
+    publishedPlansPanel.classList.toggle("hidden", !publishedActive);
   }
 
   function uuid() {
@@ -653,7 +667,7 @@
     const { data, error } = await supabase
       .schema(APP_SCHEMA)
       .from("meal_plan_periods")
-      .select("id, owner_user_id, title, start_date, days_count, people_count, same_meal_for_all, created_at, updated_at")
+      .select("id, owner_user_id, title, start_date, days_count, people_count, same_meal_for_all, published, created_at, updated_at")
       .order("start_date", { ascending: true });
 
     if (error) throw error;
@@ -666,14 +680,15 @@
       return String(a.title || "").localeCompare(String(b.title || ""));
     });
 
+    const editablePlans = getEditablePlans();
     const select = $("#plan-select");
     select.innerHTML = "";
 
-    if (!plans.length) {
+    if (!editablePlans.length) {
       selectedPlanId = null;
       const option = document.createElement("option");
       option.value = "";
-      option.textContent = "No plans yet";
+      option.textContent = plans.length ? "No plans to edit" : "No plans yet";
       select.appendChild(option);
       renderPlanList();
       if (planMode === "edit") {
@@ -684,15 +699,22 @@
       return;
     }
 
-    plans.forEach((plan) => {
+    editablePlans.forEach((plan) => {
       const option = document.createElement("option");
       option.value = plan.id;
-      option.textContent = plan.title + " (" + plan.days_count + " days from " + plan.start_date + ")";
+      option.textContent =
+        plan.title +
+        " (" +
+        plan.days_count +
+        " days from " +
+        plan.start_date +
+        (plan.published ? " • Published" : "") +
+        ")";
       select.appendChild(option);
     });
 
-    if (!selectedPlanId || !plans.some((plan) => plan.id === selectedPlanId)) {
-      selectedPlanId = plans[0].id;
+    if (!selectedPlanId || !editablePlans.some((plan) => plan.id === selectedPlanId)) {
+      selectedPlanId = editablePlans[0].id;
     }
     select.value = selectedPlanId;
 
@@ -716,6 +738,7 @@
       days_count: Number($("#plan-days").value),
       people_count: Number($("#plan-people-count").value),
       same_meal_for_all: $("#plan-same-meal-all").checked,
+      published: $("#plan-published").checked,
     };
   }
 
@@ -726,6 +749,7 @@
     $("#plan-days").value = "7";
     $("#plan-people-count").value = "1";
     $("#plan-same-meal-all").checked = true;
+    $("#plan-published").checked = false;
   }
 
   function setPlanFormFromPlan(plan) {
@@ -735,6 +759,7 @@
     $("#plan-days").value = String(plan.days_count || 7);
     $("#plan-people-count").value = String(plan.people_count || 1);
     $("#plan-same-meal-all").checked = plan.same_meal_for_all !== false;
+    $("#plan-published").checked = plan.published === true;
   }
 
   function getPlanPortionContext() {
@@ -777,9 +802,23 @@
     return !!(currentUser && plan && plan.owner_user_id === currentUser.id);
   }
 
-  function getVisiblePlans() {
-    if (showHistoricPlans) return plans.slice();
-    return plans.filter((plan) => getPlanTiming(plan) !== "historic");
+  function getOwnedPlans() {
+    if (!currentUser) return [];
+    return plans.filter((plan) => plan.owner_user_id === currentUser.id);
+  }
+
+  function getEditablePlans() {
+    return getOwnedPlans();
+  }
+
+  function getPublishedPlans() {
+    return plans.filter((plan) => plan.published === true);
+  }
+
+  function getVisiblePlans(planList) {
+    const sourcePlans = Array.isArray(planList) ? planList : plans;
+    if (showHistoricPlans) return sourcePlans.slice();
+    return sourcePlans.filter((plan) => getPlanTiming(plan) !== "historic");
   }
 
   function getPlanTimingLabel(plan) {
@@ -787,6 +826,10 @@
     if (timing === "current") return "Current";
     if (timing === "future") return "Upcoming";
     return "Historic";
+  }
+
+  function getPlanStatusLabel(plan) {
+    return getPlanTimingLabel(plan) + (plan.published ? " • Published" : " • Private");
   }
 
   async function setPlanMode(mode) {
@@ -816,8 +859,12 @@
     }
 
     if (planMode === "edit") {
-      if (!selectedPlanId && plans.length) {
-        selectedPlanId = plans[0].id;
+      const editablePlans = getEditablePlans();
+      if (!selectedPlanId && editablePlans.length) {
+        selectedPlanId = editablePlans[0].id;
+      }
+      if (selectedPlanId && !editablePlans.some((plan) => plan.id === selectedPlanId)) {
+        selectedPlanId = editablePlans.length ? editablePlans[0].id : null;
       }
       const plan = getSelectedPlan();
       if (plan) {
@@ -861,6 +908,7 @@
             days_count: values.days_count,
             people_count: values.people_count,
             same_meal_for_all: values.same_meal_for_all,
+            published: values.published,
           })
           .select("id")
           .single();
@@ -885,6 +933,7 @@
             days_count: values.days_count,
             people_count: values.people_count,
             same_meal_for_all: values.same_meal_for_all,
+            published: values.published,
           })
           .eq("id", plan.id);
         if (updateResult.error) throw updateResult.error;
@@ -950,17 +999,16 @@
     if (upsertResult.error) throw upsertResult.error;
   }
 
-  function renderPlanList() {
-    const list = $("#plan-list-view");
+  function renderPlanListCards(listSelector, sourcePlans, emptyMessages, options) {
+    const list = $(listSelector);
+    if (!list) return;
     list.innerHTML = "";
 
-    const visiblePlans = getVisiblePlans();
+    const visiblePlans = getVisiblePlans(sourcePlans);
     if (!visiblePlans.length) {
       const empty = document.createElement("p");
       empty.className = "message info";
-      empty.textContent = showHistoricPlans
-        ? "No meal plans found."
-        : "No current or upcoming plans. Turn on historic plans to see older plans.";
+      empty.textContent = showHistoricPlans ? emptyMessages.all : emptyMessages.current;
       list.appendChild(empty);
       return;
     }
@@ -975,7 +1023,7 @@
       title.textContent = plan.title;
       const status = document.createElement("p");
       status.className = "plan-list-card-status";
-      status.textContent = getPlanTimingLabel(plan);
+      status.textContent = getPlanStatusLabel(plan);
       top.appendChild(title);
       top.appendChild(status);
 
@@ -989,19 +1037,31 @@
         plan.days_count +
         " days)";
 
+      const owner = document.createElement("p");
+      owner.className = "plan-list-card-owner";
+      owner.textContent = canEditPlan(plan) ? "Created by you" : "Created by another user";
+
       const actions = document.createElement("div");
       actions.className = "plan-list-actions";
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "edit";
-      editBtn.textContent = "Edit";
-      editBtn.addEventListener("click", async () => {
-        selectedPlanId = plan.id;
-        await setPlanMode("edit");
-      });
-      actions.appendChild(editBtn);
-
       if (canEditPlan(plan)) {
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "edit";
+        editBtn.textContent = "Edit";
+        editBtn.addEventListener("click", async () => {
+          selectedPlanId = plan.id;
+          setMainTab("plans");
+          await setPlanMode("edit");
+        });
+        actions.appendChild(editBtn);
+
+        const publishBtn = document.createElement("button");
+        publishBtn.type = "button";
+        publishBtn.className = "publish-toggle";
+        publishBtn.textContent = plan.published ? "Unpublish" : "Publish";
+        publishBtn.addEventListener("click", async () => togglePlanPublished(plan, !plan.published));
+        actions.appendChild(publishBtn);
+
         const deleteBtn = document.createElement("button");
         deleteBtn.type = "button";
         deleteBtn.className = "delete";
@@ -1037,10 +1097,54 @@
 
       card.appendChild(top);
       card.appendChild(range);
+      if (options && options.showOwner) card.appendChild(owner);
       card.appendChild(actions);
       card.appendChild(detail);
       list.appendChild(card);
     });
+  }
+
+  function renderPlanList() {
+    renderPlanListCards(
+      "#plan-list-view",
+      getOwnedPlans(),
+      {
+        all: "No meal plans found.",
+        current: "No current or upcoming plans. Turn on historic plans to see older plans.",
+      },
+      { showOwner: false }
+    );
+    renderPlanListCards(
+      "#published-plan-list-view",
+      getPublishedPlans(),
+      {
+        all: "No published meal plans found.",
+        current: "No current or upcoming published plans. Turn on historic plans to see older plans.",
+      },
+      { showOwner: true }
+    );
+  }
+
+  async function togglePlanPublished(plan, nextPublishedState) {
+    if (!plan || !canEditPlan(plan)) return;
+
+    try {
+      const result = await supabase
+        .schema(APP_SCHEMA)
+        .from("meal_plan_periods")
+        .update({ published: nextPublishedState })
+        .eq("id", plan.id);
+      if (result.error) throw result.error;
+      await loadPlans();
+      if (planMode === "edit" && selectedPlanId === plan.id) {
+        const selected = getSelectedPlan();
+        if (selected) setPlanFormFromPlan(selected);
+      }
+      setStatus(nextPublishedState ? "Plan published." : "Plan unpublished.", "success");
+    } catch (error) {
+      console.error(error);
+      setStatus(error.message || "Failed to update plan visibility.", "error");
+    }
   }
 
   async function renderPlanViewDetail(plan, container) {
@@ -1630,7 +1734,7 @@
       dayDrafts = {};
       planMode = "view";
       showHistoricPlans = false;
-      $("#show-historic-plans").checked = false;
+      syncHistoricPlanCheckboxes();
       await setPlanMode("view");
       renderPlanList();
       updateSeasoningTagSuggestions();
@@ -1641,6 +1745,7 @@
 
     $("#open-meals-tab").addEventListener("click", () => setMainTab("meals"));
     $("#open-plans-tab").addEventListener("click", () => setMainTab("plans"));
+    $("#open-published-plans-tab").addEventListener("click", () => setMainTab("published-plans"));
 
     $("#add-ingredient-row").addEventListener("click", () => addIngredientRow());
     $("#add-seasoning-tag").addEventListener("click", handleAddSeasoningTag);
@@ -1661,9 +1766,12 @@
     $("#plan-view-mode-btn").addEventListener("click", () => setPlanMode("view"));
     $("#plan-create-mode-btn").addEventListener("click", () => setPlanMode("create"));
     $("#plan-edit-mode-btn").addEventListener("click", () => setPlanMode("edit"));
-    $("#show-historic-plans").addEventListener("change", (event) => {
-      showHistoricPlans = !!event.target.checked;
-      renderPlanList();
+    ["#show-historic-plans", "#show-historic-published-plans"].forEach((selector) => {
+      $(selector).addEventListener("change", (event) => {
+        showHistoricPlans = !!event.target.checked;
+        syncHistoricPlanCheckboxes();
+        renderPlanList();
+      });
     });
 
     $("#plan-select").addEventListener("change", async (event) => {
@@ -1673,7 +1781,7 @@
       await loadPlanEntries(selectedPlanId);
     });
 
-    ["#plan-start", "#plan-days", "#plan-people-count", "#plan-same-meal-all"].forEach((selector) => {
+    ["#plan-start", "#plan-days", "#plan-people-count", "#plan-same-meal-all", "#plan-published"].forEach((selector) => {
       $(selector).addEventListener("change", () => {
         renderPlanDays();
       });
@@ -1690,6 +1798,7 @@
   async function start() {
     bindEvents();
     await setPlanMode("view");
+    syncHistoricPlanCheckboxes();
     $("#plan-start").value = nowDateIso();
     addIngredientRow();
     renderSelectedSeasoningTags();
