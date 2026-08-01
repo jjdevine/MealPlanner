@@ -42,6 +42,9 @@
   let planMode = "view";
   let showHistoricPlans = false;
 
+  const MEAL_TYPES = ["breakfast", "dinner", "tea"];
+  const MEAL_TYPE_LABELS = { breakfast: "Breakfast", dinner: "Dinner", tea: "Tea" };
+
   function nowDateIso() {
     return new Date().toISOString().slice(0, 10);
   }
@@ -667,7 +670,7 @@
     const { data, error } = await supabase
       .schema(APP_SCHEMA)
       .from("meal_plan_periods")
-      .select("id, owner_user_id, title, start_date, days_count, people_count, same_meal_for_all, published, created_at, updated_at")
+      .select("id, owner_user_id, title, start_date, days_count, people_count, same_meal_for_all, published, breakfast_enabled, dinner_enabled, tea_enabled, created_at, updated_at")
       .order("start_date", { ascending: true });
 
     if (error) throw error;
@@ -739,6 +742,9 @@
       people_count: Number($("#plan-people-count").value),
       same_meal_for_all: $("#plan-same-meal-all").checked,
       published: $("#plan-published").checked,
+      breakfast_enabled: $("#plan-breakfast-enabled").checked,
+      dinner_enabled: $("#plan-dinner-enabled").checked,
+      tea_enabled: $("#plan-tea-enabled").checked,
     };
   }
 
@@ -750,6 +756,9 @@
     $("#plan-people-count").value = "1";
     $("#plan-same-meal-all").checked = true;
     $("#plan-published").checked = false;
+    $("#plan-breakfast-enabled").checked = true;
+    $("#plan-dinner-enabled").checked = true;
+    $("#plan-tea-enabled").checked = true;
   }
 
   function setPlanFormFromPlan(plan) {
@@ -760,6 +769,9 @@
     $("#plan-people-count").value = String(plan.people_count || 1);
     $("#plan-same-meal-all").checked = plan.same_meal_for_all !== false;
     $("#plan-published").checked = plan.published === true;
+    $("#plan-breakfast-enabled").checked = plan.breakfast_enabled !== false;
+    $("#plan-dinner-enabled").checked = plan.dinner_enabled !== false;
+    $("#plan-tea-enabled").checked = plan.tea_enabled !== false;
   }
 
   function getPlanPortionContext() {
@@ -780,14 +792,16 @@
     const { data, error } = await supabase
       .schema(APP_SCHEMA)
       .from("meal_plan_entries")
-      .select("id, period_id, day_index, scheduled_date, meal_id, portions")
+      .select("id, period_id, day_index, scheduled_date, meal_id, portions, meal_type")
       .eq("period_id", planId)
       .order("day_index", { ascending: true });
 
     if (error) throw error;
 
     (data || []).forEach((entry) => {
-      dayDrafts[String(entry.day_index)] = {
+      const mealType = entry.meal_type || "dinner";
+      const key = String(entry.day_index) + "_" + mealType;
+      dayDrafts[key] = {
         id: entry.id,
         meal_id: entry.meal_id,
         portions: entry.portions == null ? "" : String(entry.portions),
@@ -891,6 +905,11 @@
       return;
     }
 
+    if (!values.breakfast_enabled && !values.dinner_enabled && !values.tea_enabled) {
+      showPlanFormMessage("At least one meal type (Breakfast, Dinner, or Tea) must be enabled.", "error");
+      return;
+    }
+
     if (planMode === "view") return;
     const creatingPlan = planMode === "create";
 
@@ -909,6 +928,9 @@
             people_count: values.people_count,
             same_meal_for_all: values.same_meal_for_all,
             published: values.published,
+            breakfast_enabled: values.breakfast_enabled,
+            dinner_enabled: values.dinner_enabled,
+            tea_enabled: values.tea_enabled,
           })
           .select("id")
           .single();
@@ -934,6 +956,9 @@
             people_count: values.people_count,
             same_meal_for_all: values.same_meal_for_all,
             published: values.published,
+            breakfast_enabled: values.breakfast_enabled,
+            dinner_enabled: values.dinner_enabled,
+            tea_enabled: values.tea_enabled,
           })
           .eq("id", plan.id);
         if (updateResult.error) throw updateResult.error;
@@ -961,31 +986,40 @@
     const rows = [];
 
     for (let dayIndex = 0; dayIndex < planValues.days_count; dayIndex += 1) {
-      const key = String(dayIndex);
-      const draft = drafts[key] || {};
-      if (!draft.meal_id) continue;
+      for (const mealType of MEAL_TYPES) {
+        if (!planValues[mealType + "_enabled"]) continue;
 
-      const meal = getMealById(draft.meal_id);
-      let portions = draft.portions ? Number(draft.portions) : null;
-      if (!portions || portions <= 0) {
-        throw new Error("Portions must be greater than zero for day " + (dayIndex + 1) + ".");
-      }
+        const key = String(dayIndex) + "_" + mealType;
+        const draft = drafts[key] || {};
+        if (!draft.meal_id) continue;
 
-      if (meal) {
-        const minimumPortions = getDefaultPlanPortions(meal, planContext);
-        if (portions < minimumPortions) {
-          throw new Error("Portions must be at least " + minimumPortions + " for day " + (dayIndex + 1) + ".");
+        const meal = getMealById(draft.meal_id);
+        let portions = draft.portions ? Number(draft.portions) : null;
+        if (!portions || portions <= 0) {
+          throw new Error(
+            "Portions must be greater than zero for day " + (dayIndex + 1) + " (" + MEAL_TYPE_LABELS[mealType] + ")."
+          );
         }
-      }
 
-      rows.push({
-        id: draft.id || uuid(),
-        period_id: planId,
-        day_index: dayIndex,
-        scheduled_date: addDays(planValues.start_date, dayIndex),
-        meal_id: draft.meal_id,
-        portions,
-      });
+        if (meal) {
+          const minimumPortions = getDefaultPlanPortions(meal, planContext);
+          if (portions < minimumPortions) {
+            throw new Error(
+              "Portions must be at least " + minimumPortions + " for day " + (dayIndex + 1) + " (" + MEAL_TYPE_LABELS[mealType] + ")."
+            );
+          }
+        }
+
+        rows.push({
+          id: draft.id || uuid(),
+          period_id: planId,
+          day_index: dayIndex,
+          scheduled_date: addDays(planValues.start_date, dayIndex),
+          meal_id: draft.meal_id,
+          portions,
+          meal_type: mealType,
+        });
+      }
     }
 
     const clearResult = await supabase.schema(APP_SCHEMA).from("meal_plan_entries").delete().eq("period_id", planId);
@@ -995,7 +1029,7 @@
     const upsertResult = await supabase
       .schema(APP_SCHEMA)
       .from("meal_plan_entries")
-      .upsert(rows, { onConflict: "period_id,day_index" });
+      .upsert(rows, { onConflict: "period_id,day_index,meal_type" });
     if (upsertResult.error) throw upsertResult.error;
   }
 
@@ -1169,8 +1203,15 @@
 
     container.innerHTML = "";
     const today = nowDateIso();
+    // Map: day_index -> Map<meal_type, entry>
     const entriesMap = new Map();
-    entries.forEach((e) => entriesMap.set(e.day_index, e));
+    entries.forEach((e) => {
+      if (!entriesMap.has(e.day_index)) entriesMap.set(e.day_index, new Map());
+      entriesMap.get(e.day_index).set(e.meal_type || "dinner", e);
+    });
+
+    // Determine which meal types to show for this plan
+    const planEnabledTypes = MEAL_TYPES.filter((t) => plan[t + "_enabled"] !== false);
 
     // Day breakdown
     const daysHeading = document.createElement("p");
@@ -1184,28 +1225,42 @@
     for (let i = 0; i < plan.days_count; i++) {
       const scheduledDate = addDays(plan.start_date, i);
       const isPast = scheduledDate < today;
-      const entry = entriesMap.get(i);
-      const meal = entry && entry.meal_id ? getMealById(entry.meal_id) : null;
+      const dayEntriesMap = entriesMap.get(i) || new Map();
 
-      const dayRow = document.createElement("div");
-      dayRow.className = "plan-view-day-row" + (isPast ? " past" : "");
+      const dayBlock = document.createElement("div");
+      dayBlock.className = "plan-view-day-block" + (isPast ? " past" : "");
 
-      const dayLabel = document.createElement("span");
+      const dayLabel = document.createElement("div");
       dayLabel.className = "plan-view-day-label";
       dayLabel.textContent = "Day " + (i + 1) + " \u2013 " + formatDate(scheduledDate);
+      dayBlock.appendChild(dayLabel);
 
-      const mealName = document.createElement("span");
-      mealName.className = "plan-view-day-meal" + (meal ? "" : " no-meal");
-      mealName.textContent = meal ? meal.name : "No meal assigned";
+      planEnabledTypes.forEach((mealType) => {
+        const entry = dayEntriesMap.get(mealType);
+        const meal = entry && entry.meal_id ? getMealById(entry.meal_id) : null;
 
-      const portionsSpan = document.createElement("span");
-      portionsSpan.className = "plan-view-day-portions";
-      portionsSpan.textContent = meal && entry && entry.portions ? entry.portions + " portions" : "";
+        const typeRow = document.createElement("div");
+        typeRow.className = "plan-view-day-row";
 
-      dayRow.appendChild(dayLabel);
-      dayRow.appendChild(mealName);
-      dayRow.appendChild(portionsSpan);
-      daysGrid.appendChild(dayRow);
+        const typeLabel = document.createElement("span");
+        typeLabel.className = "plan-view-day-type-label";
+        typeLabel.textContent = MEAL_TYPE_LABELS[mealType];
+
+        const mealName = document.createElement("span");
+        mealName.className = "plan-view-day-meal" + (meal ? "" : " no-meal");
+        mealName.textContent = meal ? meal.name : "No meal assigned";
+
+        const portionsSpan = document.createElement("span");
+        portionsSpan.className = "plan-view-day-portions";
+        portionsSpan.textContent = meal && entry && entry.portions ? entry.portions + " portions" : "";
+
+        typeRow.appendChild(typeLabel);
+        typeRow.appendChild(mealName);
+        typeRow.appendChild(portionsSpan);
+        dayBlock.appendChild(typeRow);
+      });
+
+      daysGrid.appendChild(dayBlock);
     }
     container.appendChild(daysGrid);
 
@@ -1227,38 +1282,40 @@
       const scheduledDate = addDays(plan.start_date, i);
       if (scheduledDate < today) continue;
 
-      const entry = entriesMap.get(i);
-      if (!entry || !entry.meal_id) continue;
-      const meal = getMealById(entry.meal_id);
-      if (!meal) continue;
-      const portions = entry.portions ? Number(entry.portions) : NaN;
-      if (!Number.isFinite(portions) || portions <= 0) continue;
+      const dayEntriesMap = entriesMap.get(i) || new Map();
+      dayEntriesMap.forEach((entry) => {
+        if (!entry || !entry.meal_id) return;
+        const meal = getMealById(entry.meal_id);
+        if (!meal) return;
+        const portions = entry.portions ? Number(entry.portions) : NaN;
+        if (!Number.isFinite(portions) || portions <= 0) return;
 
-      const basePortions = getMealMinimumPortions(meal);
-      const multiplier = portions / basePortions;
-      if (!Number.isFinite(multiplier) || multiplier <= 0) continue;
+        const basePortions = getMealMinimumPortions(meal);
+        const multiplier = portions / basePortions;
+        if (!Number.isFinite(multiplier) || multiplier <= 0) return;
 
-      (meal.meal_ingredients || []).forEach((ingredient) => {
-        const quantity = Number(ingredient.quantity);
-        if (!Number.isFinite(quantity) || quantity <= 0) return;
-        const name = String(ingredient.ingredient_name || "").trim();
-        const unit = String(ingredient.unit || "").trim();
-        if (!name || !unit) return;
-        const key = name.toLowerCase() + "|" + unit.toLowerCase();
-        const existing = ingredientTotals.get(key);
-        const totalQuantity = quantity * multiplier;
-        if (existing) {
-          existing.quantity += totalQuantity;
-        } else {
-          ingredientTotals.set(key, { name, unit, quantity: totalQuantity });
-        }
-      });
+        (meal.meal_ingredients || []).forEach((ingredient) => {
+          const quantity = Number(ingredient.quantity);
+          if (!Number.isFinite(quantity) || quantity <= 0) return;
+          const name = String(ingredient.ingredient_name || "").trim();
+          const unit = String(ingredient.unit || "").trim();
+          if (!name || !unit) return;
+          const key = name.toLowerCase() + "|" + unit.toLowerCase();
+          const existing = ingredientTotals.get(key);
+          const totalQuantity = quantity * multiplier;
+          if (existing) {
+            existing.quantity += totalQuantity;
+          } else {
+            ingredientTotals.set(key, { name, unit, quantity: totalQuantity });
+          }
+        });
 
-      (meal.seasoning_tags || []).forEach((tag) => {
-        const name = String(tag.name || "").trim();
-        if (!name) return;
-        const key = name.toLowerCase();
-        if (!condimentNames.has(key)) condimentNames.set(key, name);
+        (meal.seasoning_tags || []).forEach((tag) => {
+          const name = String(tag.name || "").trim();
+          if (!name) return;
+          const key = name.toLowerCase();
+          if (!condimentNames.has(key)) condimentNames.set(key, name);
+        });
       });
     }
 
@@ -1324,14 +1381,18 @@
 
     const rows = [];
     for (let index = 0; index < values.days_count; index += 1) {
-      const key = String(index);
       const scheduledDate = addDays(values.start_date, index);
-      const draft = dayDrafts[key] || { meal_id: "", portions: "", scheduled_date: scheduledDate };
-      rows.push({
-        day_index: index,
-        scheduled_date: scheduledDate,
-        meal_id: draft.meal_id || "",
-        portions: draft.portions || "",
+      MEAL_TYPES.forEach((mealType) => {
+        if (!values[mealType + "_enabled"]) return;
+        const key = String(index) + "_" + mealType;
+        const draft = dayDrafts[key] || { meal_id: "", portions: "", scheduled_date: scheduledDate };
+        rows.push({
+          day_index: index,
+          scheduled_date: scheduledDate,
+          meal_type: mealType,
+          meal_id: draft.meal_id || "",
+          portions: draft.portions || "",
+        });
       });
     }
     return rows;
@@ -1382,79 +1443,117 @@
       return;
     }
 
+    const values = getPlanFormValues();
+    const enabledTypes = MEAL_TYPES.filter((t) => values[t + "_enabled"]);
+
+    if (!enabledTypes.length) {
+      const emptyTypes = document.createElement("p");
+      emptyTypes.className = "message info";
+      emptyTypes.textContent = "Enable at least one meal type to assign meals.";
+      grid.appendChild(emptyTypes);
+      renderPlanShoppingSummary();
+      return;
+    }
+
+    // Group rows by day
+    const rowsByDay = new Map();
     buildDayRows().forEach((row) => {
+      if (!rowsByDay.has(row.day_index)) rowsByDay.set(row.day_index, []);
+      rowsByDay.get(row.day_index).push(row);
+    });
+
+    rowsByDay.forEach((typeRows, dayIndex) => {
+      const firstRow = typeRows[0];
       const wrapper = document.createElement("div");
       wrapper.className = "day-row";
 
       const label = document.createElement("div");
       label.className = "day-label";
-      label.textContent = "Day " + (row.day_index + 1) + " - " + formatDate(row.scheduled_date);
+      label.textContent = "Day " + (dayIndex + 1) + " - " + formatDate(firstRow.scheduled_date);
+      wrapper.appendChild(label);
 
-      const mealField = document.createElement("div");
-      mealField.className = "day-input-field";
-      const mealFieldLabel = document.createElement("label");
-      mealFieldLabel.className = "day-input-label";
-      mealFieldLabel.textContent = "Meal";
-      const mealSelect = createMealSelect(row.meal_id);
-      mealField.appendChild(mealFieldLabel);
-      mealField.appendChild(mealSelect);
+      const mealTypesContainer = document.createElement("div");
+      mealTypesContainer.className = "day-meal-types";
 
-      const portionsField = document.createElement("div");
-      portionsField.className = "day-input-field";
-      const portionsLabel = document.createElement("label");
-      portionsLabel.className = "day-input-label";
-      portionsLabel.textContent = "Portions";
-      const portions = document.createElement("input");
-      portions.type = "number";
-      portions.min = "1";
-      portions.step = "0.5";
-      portions.placeholder = "Portions";
-      portions.value = row.portions;
-      portionsField.appendChild(portionsLabel);
-      portionsField.appendChild(portions);
+      typeRows.forEach((row) => {
+        const typeRow = document.createElement("div");
+        typeRow.className = "day-meal-type-row";
 
-      mealSelect.addEventListener("change", () => {
-        const selectedMeal = getMealById(mealSelect.value);
+        const typeLabel = document.createElement("span");
+        typeLabel.className = "day-meal-type-label";
+        typeLabel.textContent = MEAL_TYPE_LABELS[row.meal_type];
+
+        const mealField = document.createElement("div");
+        mealField.className = "day-input-field";
+        const mealFieldLabel = document.createElement("label");
+        mealFieldLabel.className = "day-input-label";
+        mealFieldLabel.textContent = "Meal";
+        const mealSelect = createMealSelect(row.meal_id);
+        mealField.appendChild(mealFieldLabel);
+        mealField.appendChild(mealSelect);
+
+        const portionsField = document.createElement("div");
+        portionsField.className = "day-input-field";
+        const portionsLabel = document.createElement("label");
+        portionsLabel.className = "day-input-label";
+        portionsLabel.textContent = "Portions";
+        const portions = document.createElement("input");
+        portions.type = "number";
+        portions.min = "1";
+        portions.step = "0.5";
+        portions.placeholder = "Portions";
+        portions.value = row.portions;
+        portionsField.appendChild(portionsLabel);
+        portionsField.appendChild(portions);
+
+        const draftKey = String(row.day_index) + "_" + row.meal_type;
+
+        mealSelect.addEventListener("change", () => {
+          const selectedMeal = getMealById(mealSelect.value);
+          if (selectedMeal) {
+            const defaultPortions = getDefaultPlanPortions(selectedMeal, getPlanPortionContext());
+            const currentPortions = portions.value ? Number(portions.value) : null;
+            if (!currentPortions || currentPortions < defaultPortions) {
+              portions.value = String(defaultPortions);
+            }
+          }
+
+          const existing = dayDrafts[draftKey] || {};
+          dayDrafts[draftKey] = {
+            ...existing,
+            meal_id: mealSelect.value,
+            scheduled_date: row.scheduled_date,
+            portions: portions.value,
+          };
+          renderPlanShoppingSummary();
+        });
+
+        const selectedMeal = getMealById(row.meal_id);
         if (selectedMeal) {
-          const defaultPortions = getDefaultPlanPortions(selectedMeal, getPlanPortionContext());
+          const minimumPortions = getDefaultPlanPortions(selectedMeal, getPlanPortionContext());
           const currentPortions = portions.value ? Number(portions.value) : null;
-          if (!currentPortions || currentPortions < defaultPortions) {
-            portions.value = String(defaultPortions);
+          if (!currentPortions || currentPortions < minimumPortions) {
+            portions.value = String(minimumPortions);
           }
         }
+        portions.addEventListener("input", () => {
+          const existing = dayDrafts[draftKey] || {};
+          dayDrafts[draftKey] = {
+            ...existing,
+            meal_id: mealSelect.value,
+            scheduled_date: row.scheduled_date,
+            portions: portions.value,
+          };
+          renderPlanShoppingSummary();
+        });
 
-        const existing = dayDrafts[String(row.day_index)] || {};
-        dayDrafts[String(row.day_index)] = {
-          ...existing,
-          meal_id: mealSelect.value,
-          scheduled_date: row.scheduled_date,
-          portions: portions.value,
-        };
-        renderPlanShoppingSummary();
+        typeRow.appendChild(typeLabel);
+        typeRow.appendChild(mealField);
+        typeRow.appendChild(portionsField);
+        mealTypesContainer.appendChild(typeRow);
       });
 
-      const selectedMeal = getMealById(row.meal_id);
-      if (selectedMeal) {
-        const minimumPortions = getDefaultPlanPortions(selectedMeal, getPlanPortionContext());
-        const currentPortions = portions.value ? Number(portions.value) : null;
-        if (!currentPortions || currentPortions < minimumPortions) {
-          portions.value = String(minimumPortions);
-        }
-      }
-      portions.addEventListener("input", () => {
-        const existing = dayDrafts[String(row.day_index)] || {};
-        dayDrafts[String(row.day_index)] = {
-          ...existing,
-          meal_id: mealSelect.value,
-          scheduled_date: row.scheduled_date,
-          portions: portions.value,
-        };
-        renderPlanShoppingSummary();
-      });
-
-      wrapper.appendChild(label);
-      wrapper.appendChild(mealField);
-      wrapper.appendChild(portionsField);
+      wrapper.appendChild(mealTypesContainer);
       grid.appendChild(wrapper);
     });
     renderPlanShoppingSummary();
@@ -1572,6 +1671,9 @@
     const values = getPlanFormValues();
     if (!values.start_date || !values.days_count || values.days_count < 1 || !meals.length) return;
 
+    const enabledTypes = MEAL_TYPES.filter((t) => values[t + "_enabled"]);
+    if (!enabledTypes.length) return;
+
     const rotated = meals.slice();
     for (let i = rotated.length - 1; i > 0; i -= 1) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -1580,28 +1682,24 @@
       rotated[j] = temp;
     }
 
-    const rows = [];
+    let mealIndex = 0;
     for (let day = 0; day < values.days_count; day += 1) {
-      const meal = rotated[day % rotated.length];
-      const portions = getDefaultPlanPortions(meal, getPlanPortionContext());
-      rows.push({
-        day_index: day,
-        scheduled_date: addDays(values.start_date, day),
-        meal_id: meal.id,
-        portions,
+      const scheduledDate = addDays(values.start_date, day);
+      enabledTypes.forEach((mealType) => {
+        const meal = rotated[mealIndex % rotated.length];
+        mealIndex += 1;
+        const portions = getDefaultPlanPortions(meal, getPlanPortionContext());
+        const key = String(day) + "_" + mealType;
+        const existing = dayDrafts[key] || {};
+        dayDrafts[key] = {
+          ...existing,
+          meal_id: meal.id,
+          portions: String(portions),
+          scheduled_date: scheduledDate,
+        };
       });
     }
 
-    rows.forEach((row) => {
-      const key = String(row.day_index);
-      const existing = dayDrafts[key] || {};
-      dayDrafts[key] = {
-        ...existing,
-        meal_id: row.meal_id,
-        portions: String(row.portions),
-        scheduled_date: row.scheduled_date,
-      };
-    });
     renderPlanDays();
     setStatus("Suggested meals prepared. Save plan to keep changes.", "success");
   }
@@ -1781,7 +1879,8 @@
       await loadPlanEntries(selectedPlanId);
     });
 
-    ["#plan-start", "#plan-days", "#plan-people-count", "#plan-same-meal-all", "#plan-published"].forEach((selector) => {
+    ["#plan-start", "#plan-days", "#plan-people-count", "#plan-same-meal-all", "#plan-published",
+     "#plan-breakfast-enabled", "#plan-dinner-enabled", "#plan-tea-enabled"].forEach((selector) => {
       $(selector).addEventListener("change", () => {
         renderPlanDays();
       });
